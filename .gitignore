@@ -1,0 +1,10 @@
+bin/
+dist/
+web/node_modules/
+web/dist/
+*.db
+*.db-shm
+*.db-wal
+.env
+sego-data/
+.DS_Store
