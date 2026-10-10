@@ -87,6 +87,7 @@ Write-Host "  Mode      : $Profile"
 Write-Host '  Dashboard : http://127.0.0.1:8088'
 Write-Host "  Data      : $Data"
 Write-Host '  Startup   : automatic'
+Write-Host '  Updates   : automatic GitHub Release checks'
 Write-Host 'No disk will be formatted or repartitioned. Existing SEGO data is preserved.'
 if (-not $Yes) {
     $a = Read-Host 'Continue? [Y/n]'
@@ -102,7 +103,11 @@ if ($nodeMajor -lt 18) { throw "Node.js 18 or newer is required. Installed versi
 New-Item -ItemType Directory -Force -Path $Bin,$Data,$WebRoot | Out-Null
 Push-Location $RepoRoot
 try {
-    Step '1/7 Building the dashboard'
+    Step '1/8 Resolving verified Go dependencies'
+    & go mod tidy
+    if ($LASTEXITCODE -ne 0) { throw 'go mod tidy failed.' }
+
+    Step '2/8 Building the dashboard'
     Push-Location web
     try {
         & npm install --no-audit --no-fund
@@ -111,13 +116,15 @@ try {
         if ($LASTEXITCODE -ne 0) { throw 'dashboard build failed.' }
     } finally { Pop-Location }
 
-    Step '2/7 Building SEGO'
+    Step '3/8 Building SEGO'
     & go build -trimpath -o (Join-Path $Bin 'sego-server.exe') ./cmd/server
     if ($LASTEXITCODE -ne 0) { throw 'Failed to build sego-server.exe.' }
     & go build -trimpath -o (Join-Path $Bin 'sego.exe') ./cmd/sego
     if ($LASTEXITCODE -ne 0) { throw 'Failed to build sego.exe.' }
+    & go build -trimpath -o (Join-Path $Bin 'sego-updater.exe') ./cmd/updater
+    if ($LASTEXITCODE -ne 0) { throw 'Failed to build sego-updater.exe.' }
 
-    Step '3/7 Installing dashboard and configuration'
+    Step '4/8 Installing dashboard and configuration'
     if (Test-Path $WebRoot) { Remove-Item $WebRoot -Recurse -Force }
     New-Item -ItemType Directory -Force -Path $WebRoot | Out-Null
     Copy-Item (Join-Path $RepoRoot 'web\dist\*') $WebRoot -Recurse -Force
@@ -128,32 +135,36 @@ try {
         if ($LASTEXITCODE -ne 0) { throw 'Failed to initialize SEGO configuration.' }
     } finally { $env:SEGO_DATA_DIR = $oldData }
 
-    Step '4/7 Protecting server data'
+    Step '5/8 Protecting server data'
     & icacls $Data /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' | Out-Null
 
-    Step '5/7 Enabling automatic startup'
-    $TaskName = 'SEGO Server'
-    $Exe = Join-Path $Bin 'sego-server.exe'
-    $serverArg = "--config `"$Config`""
-    $action = New-ScheduledTaskAction -Execute $Exe -Argument $serverArg
-    $trigger = New-ScheduledTaskTrigger -AtStartup
+    Step '6/8 Enabling automatic startup and updates'
     $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
-    Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Principal $principal -Description 'SEGO Server private cloud storage service' -Force | Out-Null
-    Start-ScheduledTask -TaskName $TaskName
+    $serverExe = Join-Path $Bin 'sego-server.exe'
+    $serverAction = New-ScheduledTaskAction -Execute $serverExe -Argument "--config `"$Config`""
+    $serverTrigger = New-ScheduledTaskTrigger -AtStartup
+    Register-ScheduledTask -TaskName 'SEGO Server' -Action $serverAction -Trigger $serverTrigger -Principal $principal -Description 'SEGO Server private cloud storage service' -Force | Out-Null
+    Start-ScheduledTask -TaskName 'SEGO Server'
+
+    $updateExe = Join-Path $Bin 'sego-updater.exe'
+    $updateAction = New-ScheduledTaskAction -Execute $updateExe -Argument "--config `"$Config`""
+    $updateTriggers = @((New-ScheduledTaskTrigger -AtStartup),(New-ScheduledTaskTrigger -Daily -At 4am))
+    Register-ScheduledTask -TaskName 'SEGO Update' -Action $updateAction -Trigger $updateTriggers -Principal $principal -Description 'SEGO GitHub Release update checker' -Force | Out-Null
     Add-MachinePath $Bin
 
-    Step '6/7 Creating your administrator account'
+    Step '7/8 Creating your administrator account'
     & (Join-Path $Bin 'sego.exe') --config $Config setup
     if ($LASTEXITCODE -ne 0) { throw 'Administrator setup failed.' }
 
-    Step '7/7 Checking SEGO'
+    Step '8/8 Checking SEGO'
     & (Join-Path $Bin 'sego.exe') --config $Config doctor
     if ($LASTEXITCODE -ne 0) { throw 'SEGO diagnostics failed.' }
 
     Write-Host "`nSEGO Server is installed." -ForegroundColor Green
     Write-Host 'Open SEGO:  sego open'
     Write-Host 'Check SEGO: sego status'
-    Write-Host 'Help:       sego help'
+    Write-Host 'Remote:     sego tunnel setup'
+    Write-Host 'Updates:    sego update check'
     Write-Host 'Dashboard:  http://127.0.0.1:8088'
     try { Start-Process 'http://127.0.0.1:8088' } catch {}
 }
