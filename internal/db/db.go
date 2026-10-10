@@ -42,6 +42,7 @@ func migrate(db *sql.DB) error {
  role TEXT NOT NULL CHECK(role IN ('super_admin','admin','group_manager','user')),
  quota_bytes INTEGER NOT NULL DEFAULT 10737418240,
  reserved_bytes INTEGER NOT NULL DEFAULT 0,
+ disabled_at TEXT,
  created_at TEXT NOT NULL
 );`,
 		`CREATE TABLE IF NOT EXISTS sessions (
@@ -115,7 +116,37 @@ func migrate(db *sql.DB) error {
 			return fmt.Errorf("migration %d: %w", i+1, err)
 		}
 	}
+	// Existing installations created before account disabling was introduced do
+	// not have disabled_at. Add it idempotently without resetting user data.
+	if err := ensureColumn(db, "users", "disabled_at", "TEXT"); err != nil {
+		return fmt.Errorf("users disabled_at migration: %w", err)
+	}
 	return nil
+}
+
+func ensureColumn(db *sql.DB, table, column, definition string) error {
+	rows, err := db.Query(`PRAGMA table_info(` + table + `)`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notNull, pk int
+		var defaultValue any
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &defaultValue, &pk); err != nil {
+			return err
+		}
+		if name == column {
+			return nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	_, err = db.Exec(`ALTER TABLE ` + table + ` ADD COLUMN ` + column + ` ` + definition)
+	return err
 }
 
 type User struct {
@@ -127,6 +158,7 @@ type User struct {
 func AuthenticateSession(ctx context.Context, d *sql.DB, tokenHash string) (User, error) {
 	var u User
 	err := d.QueryRowContext(ctx, `SELECT u.id,u.username,u.role,u.quota_bytes,u.reserved_bytes
-FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=? AND s.expires_at>?`, tokenHash, time.Now().UTC().Format(time.RFC3339)).Scan(&u.ID, &u.Username, &u.Role, &u.QuotaBytes, &u.ReservedBytes)
+FROM sessions s JOIN users u ON u.id=s.user_id
+WHERE s.token_hash=? AND s.expires_at>? AND u.disabled_at IS NULL`, tokenHash, time.Now().UTC().Format(time.RFC3339)).Scan(&u.ID, &u.Username, &u.Role, &u.QuotaBytes, &u.ReservedBytes)
 	return u, err
 }
