@@ -1,67 +1,48 @@
-# SEGO Server Test Report
+# SEGO Server Verification Report
 
-**Workspace date:** 2026-10-10
+Date: 2026-10-10
 
-This report records only checks that were actually executed in the current build workspace. It intentionally separates executed verification from CI that is configured but not yet observed here.
+This report distinguishes checks actually executed in the development workspace from checks delegated to GitHub CI or still pending.
 
-## Executed and passed
+## Executed successfully in the workspace
 
-### Dependency-light Go package tests
+- `bash -n install.sh scripts/install.sh scripts/bootstrap.sh`
+- `go test ./internal/config`
+- `go test ./internal/namespace`
+- `go test ./internal/storage`
+- package compilation checks for `internal/securitylock` and `internal/audit` through `go test`
+- Go formatting for modified backend/CLI packages
 
-```text
-go test ./internal/config ./internal/namespace ./internal/storage
-ok  github.com/nadeemmhdm/sego-server/internal/config
-ok  github.com/nadeemmhdm/sego-server/internal/namespace
-ok  github.com/nadeemmhdm/sego-server/internal/storage
-```
+The storage/namespace tests include root-confinement and traversal-related cases already present in the repository.
 
-Validated behaviors include:
+## Not fully executed in this workspace
 
-- low-resource mode configuration
-- standard mode configuration
-- rejection of unknown runtime modes
-- storage-root traversal rejection
-- user namespace traversal confinement
-- symbolic-link rejection on the supported Unix test path
-- streaming write followed by directory listing
-- namespace-to-public-path stripping
+### Full Go dependency build
 
-### Shell syntax
-
-```text
-bash -n scripts/install.sh scripts/uninstall.sh
-```
-
-Result: passed.
-
-## Not executable in this sandbox
-
-### Complete Go dependency-backed test suite
-
-The full repository depends on external modules including Chi, `x/crypto`, `x/term`, and `modernc.org/sqlite`. Earlier attempts in this sandbox could not fetch missing modules because outbound module download access was unavailable. Therefore this report does not claim `go test ./...` passed here.
-
-### PowerShell parser/runtime validation
-
-PowerShell (`pwsh`) is not installed in the current Linux workspace, so the Windows installer was reviewed and prepared for Windows CI but not executed here.
+`go test ./...` could not complete because the execution environment could not obtain missing external module checksum/dependency data. It reported missing `go.sum` entries for external modules. The repository CI is configured to run the full Go test/vet/build matrix with network-enabled GitHub runners.
 
 ### Frontend dependency build
 
-The web build requires npm dependency installation. This report does not claim a production frontend build was completed in this workspace unless a later CI result explicitly records it.
+`npm install` could not complete in the local execution sandbox because external package retrieval timed out. GitHub CI is configured to install pinned direct frontend dependencies and run the TypeScript/Vite build.
 
-## Still requiring broader validation
+### PowerShell parser
 
-- Windows binary build and native service behavior
-- Ubuntu/Debian clean-machine install/reinstall
-- full SQLite/auth/share integration tests
-- concurrent quota race integration tests
-- interrupted upload cleanup
-- disk-full behavior
-- Cloudflare Tunnel lifecycle
-- update signature/rollback path
-- backup restoration drills
-- real-hardware 4 GB memory/CPU benchmarks
-- arm64 validation
+PowerShell (`pwsh`) is not installed in the local Linux workspace. GitHub CI parses the Windows installer/bootstrap/uninstaller scripts using PowerShell.
 
-## CI policy
+## Toolchain correction
 
-The repository includes GitHub Actions intended to run the complete dependency-backed test/build matrix after the repository is published. A configured workflow is not itself evidence that a test passed; release notes should reference observed results.
+The repository dependencies require Go 1.24 or newer. The project `go` directive, CI toolchain and installer minimum have been aligned accordingly. The Linux guided installer can install a checksum-verified Go toolchain when the system Go is too old.
+
+## Still required before production claims
+
+- successful GitHub CI on the final commit
+- Windows 10/11 clean-machine installation test
+- Ubuntu/Debian clean-machine installation test
+- browser preview/Range playback matrix
+- Emergency SOS end-to-end recovery test
+- concurrent quota and transfer stress tests
+- full security regression suite
+- measured 4 GB hardware resource benchmark
+- signed release/update/rollback validation
+
+No claim is made that those checks passed until results are captured.

@@ -17,6 +17,7 @@ const (
 type Config struct {
 	ListenAddr        string        `json:"listen_addr"`
 	DatabasePath      string        `json:"database_path"`
+	WebRoot           string        `json:"web_root"`
 	SessionHours      int           `json:"session_hours"`
 	MaxUploadBytes    int64         `json:"max_upload_bytes"`
 	UploadConcurrency int           `json:"upload_concurrency"`
@@ -37,6 +38,7 @@ func Default(base string) Config {
 	return Config{
 		ListenAddr:        "127.0.0.1:8088",
 		DatabasePath:      filepath.Join(base, "sego.db"),
+		WebRoot:           filepath.Join(base, "web"),
 		SessionHours:      24,
 		MaxUploadBytes:    10 << 30,
 		UploadConcurrency: 2,
@@ -81,7 +83,11 @@ func Ensure(path string) (Config, error) {
 	if !os.IsNotExist(err) {
 		return Config{}, err
 	}
-	c = Default(filepath.Dir(path))
+	base := os.Getenv("SEGO_DATA_DIR")
+	if base == "" {
+		base = filepath.Dir(path)
+	}
+	c = Default(base)
 	if err := ensureDirectories(c); err != nil {
 		return Config{}, err
 	}
@@ -162,6 +168,9 @@ func normalize(c *Config) error {
 	if c.ListenAddr == "" || c.DatabasePath == "" || len(c.StorageRoots) == 0 {
 		return errors.New("invalid config: listen_addr, database_path and storage_roots are required")
 	}
+	if c.WebRoot == "" {
+		c.WebRoot = filepath.Join(filepath.Dir(c.DatabasePath), "web")
+	}
 	if c.UploadConcurrency < 1 {
 		c.UploadConcurrency = 1
 	}
@@ -177,6 +186,11 @@ func normalize(c *Config) error {
 func ensureDirectories(c Config) error {
 	if err := os.MkdirAll(filepath.Dir(c.DatabasePath), 0o700); err != nil {
 		return err
+	}
+	if c.WebRoot != "" {
+		if err := os.MkdirAll(c.WebRoot, 0o750); err != nil {
+			return err
+		}
 	}
 	for _, r := range c.StorageRoots {
 		if err := os.MkdirAll(r.Path, 0o750); err != nil {

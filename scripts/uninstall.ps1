@@ -5,10 +5,15 @@ param(
     [switch]$PurgeData
 )
 $ErrorActionPreference = 'Stop'
-if (Test-Path $Prefix) { Remove-Item -Recurse -Force $Prefix }
-if ($PurgeData -and (Test-Path $Data)) {
+$task='SEGO Server'
+if(Get-ScheduledTask -TaskName $task -ErrorAction SilentlyContinue){
+    Stop-ScheduledTask -TaskName $task -ErrorAction SilentlyContinue
+    Unregister-ScheduledTask -TaskName $task -Confirm:$false
+}
+if(Test-Path $Prefix){Remove-Item -Recurse -Force $Prefix}
+if($PurgeData -and (Test-Path $Data)){
     Remove-Item -Recurse -Force $Data
     Write-Host 'SEGO binaries, configuration and data removed.'
-} else {
-    Write-Host 'SEGO binaries removed. Configuration and user data were preserved.'
+}else{
+    Write-Host 'SEGO binaries and startup task removed. Configuration and user data were preserved.'
 }

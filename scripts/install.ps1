@@ -1,63 +1,160 @@
 [CmdletBinding()]
 param(
-    [ValidateSet('low-resource','standard')]
-    [string]$Profile = 'low-resource',
+    [ValidateSet('auto','low-resource','standard')][string]$Profile = 'auto',
     [string]$Prefix = "$env:ProgramFiles\SEGO",
     [string]$Data = "$env:ProgramData\SEGO",
     [switch]$Yes
 )
-
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
+function Step([string]$Text) { Write-Host "`nSEGO $Text" -ForegroundColor Cyan }
 function Test-Administrator {
-    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
-    $principal = New-Object Security.Principal.WindowsPrincipal($identity)
-    return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    $p = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
+    return $p.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+function Refresh-Path {
+    $env:Path = [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User')
+}
+function Ensure-WingetTool([string]$Command,[string]$PackageId) {
+    if (Get-Command $Command -ErrorAction SilentlyContinue) { return }
+    if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+        throw "$Command is required, but Windows Package Manager (winget) is unavailable. Update 'App Installer' from Microsoft Store and run the same SEGO install command again."
+    }
+    Step "Installing required tool: $Command"
+    & winget install --id $PackageId -e --accept-source-agreements --accept-package-agreements --silent
+    if ($LASTEXITCODE -ne 0) { throw "Failed to install $Command." }
+    Refresh-Path
+    if (-not (Get-Command $Command -ErrorAction SilentlyContinue)) {
+        throw "$Command was installed but Windows has not refreshed PATH yet. Close PowerShell, open it again, and run the same SEGO install command."
+    }
+}
+function Get-GoVersion {
+    if (-not (Get-Command go -ErrorAction SilentlyContinue)) { return [version]'0.0' }
+    $v = (& go env GOVERSION 2>$null) -replace '^go',''
+    try { return [version]$v } catch { return [version]'0.0' }
+}
+function Ensure-Go {
+    if ((Get-GoVersion) -ge [version]'1.24') { return }
+    if (-not (Get-Command winget -ErrorAction SilentlyContinue)) { throw 'Go 1.24+ is required and winget is unavailable.' }
+    Step 'Installing/updating Go'
+    if (Get-Command go -ErrorAction SilentlyContinue) {
+        & winget upgrade --id GoLang.Go -e --accept-source-agreements --accept-package-agreements --silent
+        if ($LASTEXITCODE -ne 0) { & winget install --id GoLang.Go -e --accept-source-agreements --accept-package-agreements --silent }
+    } else {
+        & winget install --id GoLang.Go -e --accept-source-agreements --accept-package-agreements --silent
+    }
+    Refresh-Path
+    if ((Get-GoVersion) -lt [version]'1.24') { throw 'Go 1.24+ could not be installed.' }
+}
+function Add-MachinePath([string]$PathToAdd) {
+    $machine = [Environment]::GetEnvironmentVariable('Path','Machine')
+    $parts = @($machine -split ';' | Where-Object { $_ })
+    if ($parts -notcontains $PathToAdd) {
+        [Environment]::SetEnvironmentVariable('Path', (($parts + $PathToAdd) -join ';'), 'Machine')
+    }
+    if (($env:Path -split ';') -notcontains $PathToAdd) { $env:Path += ';' + $PathToAdd }
 }
 
 if ($PSVersionTable.PSVersion.Major -lt 5) { throw 'PowerShell 5.1 or later is required.' }
-if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) { throw 'Use scripts/install.sh on Linux.' }
-if (-not (Test-Administrator)) { throw 'Run PowerShell as Administrator for a system-wide SEGO installation.' }
-if (-not (Get-Command go -ErrorAction SilentlyContinue)) { throw 'Go 1.23+ is required when installing from a source checkout.' }
+if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) { throw 'Use the Linux installer on Linux.' }
 
-$Config = Join-Path $Data 'sego.json'
-Write-Host 'SEGO Server install plan' -ForegroundColor Cyan
-Write-Host "  profile : $Profile"
-Write-Host "  binaries: $Prefix\bin"
-Write-Host "  data    : $Data"
-Write-Host "  config  : $Config"
-Write-Host '  startup : manual in the MVP source installer (native Windows service integration is tracked separately)'
-Write-Host ''
-Write-Host 'The installer never formats or repartitions disks. Existing user data is preserved.'
-
-if (-not $Yes) {
-    $answer = Read-Host 'Continue? [y/N]'
-    if ($answer -notin @('y','Y','yes','YES','Yes')) { exit 0 }
+if (-not (Test-Administrator)) {
+    Step 'Administrator permission is required once to install the background service'
+    $elevateArgs = @(
+        '-NoProfile','-ExecutionPolicy','Bypass','-File',('"' + $PSCommandPath + '"'),
+        '-Profile',$Profile,'-Prefix',('"' + $Prefix + '"'),'-Data',('"' + $Data + '"')
+    )
+    if ($Yes) { $elevateArgs += '-Yes' }
+    $p = Start-Process powershell.exe -Verb RunAs -ArgumentList $elevateArgs -Wait -PassThru
+    exit $p.ExitCode
 }
 
+if ($Profile -eq 'auto') {
+    try {
+        $ram = (Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory
+        if ($ram -lt 6GB) { $Profile = 'low-resource' } else { $Profile = 'standard' }
+    } catch { $Profile = 'low-resource' }
+}
+
+$RepoRoot = Split-Path -Parent $PSScriptRoot
+$Config = Join-Path $Data 'sego.json'
 $Bin = Join-Path $Prefix 'bin'
-New-Item -ItemType Directory -Force -Path $Bin, $Data | Out-Null
+$WebRoot = Join-Path $Data 'web'
 
-Write-Host '[1/5] Building SEGO binaries'
-go build -trimpath -o (Join-Path $Bin 'sego-server.exe') ./cmd/server
-if ($LASTEXITCODE -ne 0) { throw 'Failed to build sego-server.exe' }
-go build -trimpath -o (Join-Path $Bin 'sego.exe') ./cmd/sego
-if ($LASTEXITCODE -ne 0) { throw 'Failed to build sego.exe' }
+Write-Host "`nSEGO is ready to install." -ForegroundColor Cyan
+Write-Host "  Mode      : $Profile"
+Write-Host '  Dashboard : http://127.0.0.1:8088'
+Write-Host "  Data      : $Data"
+Write-Host '  Startup   : automatic'
+Write-Host 'No disk will be formatted or repartitioned. Existing SEGO data is preserved.'
+if (-not $Yes) {
+    $a = Read-Host 'Continue? [Y/n]'
+    if ($a -match '^(n|no)$') { exit 0 }
+}
 
-Write-Host '[2/5] Creating configuration'
-& (Join-Path $Bin 'sego.exe') --config $Config mode set $Profile
-if ($LASTEXITCODE -ne 0) { throw 'Failed to initialize SEGO configuration' }
+Ensure-Go
+Ensure-WingetTool 'node' 'OpenJS.NodeJS.LTS'
+Ensure-WingetTool 'npm' 'OpenJS.NodeJS.LTS'
+$nodeMajor = [int]((& node -p 'process.versions.node.split(".")[0]') | Select-Object -First 1)
+if ($nodeMajor -lt 18) { throw "Node.js 18 or newer is required. Installed version: $(& node --version)" }
 
-Write-Host '[3/5] Running diagnostics'
-& (Join-Path $Bin 'sego.exe') --config $Config doctor
-if ($LASTEXITCODE -ne 0) { throw 'SEGO diagnostics failed' }
+New-Item -ItemType Directory -Force -Path $Bin,$Data,$WebRoot | Out-Null
+Push-Location $RepoRoot
+try {
+    Step '1/7 Building the dashboard'
+    Push-Location web
+    try {
+        & npm install --no-audit --no-fund
+        if ($LASTEXITCODE -ne 0) { throw 'npm install failed.' }
+        & npm run build
+        if ($LASTEXITCODE -ne 0) { throw 'dashboard build failed.' }
+    } finally { Pop-Location }
 
-Write-Host '[4/5] Installation files ready'
-Write-Host 'Native Windows service registration is not marked complete in this MVP; do not treat this source installer as a finished production service installer.' -ForegroundColor Yellow
+    Step '2/7 Building SEGO'
+    & go build -trimpath -o (Join-Path $Bin 'sego-server.exe') ./cmd/server
+    if ($LASTEXITCODE -ne 0) { throw 'Failed to build sego-server.exe.' }
+    & go build -trimpath -o (Join-Path $Bin 'sego.exe') ./cmd/sego
+    if ($LASTEXITCODE -ne 0) { throw 'Failed to build sego.exe.' }
 
-Write-Host '[5/5] Installation complete' -ForegroundColor Green
-Write-Host "Create the first administrator: & '$Bin\sego.exe' --config '$Config' admin create"
-Write-Host "Start SEGO manually:            & '$Bin\sego-server.exe' --config '$Config'"
-Write-Host "Set low-resource mode:          & '$Bin\sego.exe' --config '$Config' mode set low-resource"
-Write-Host "Set standard mode:              & '$Bin\sego.exe' --config '$Config' mode set standard"
+    Step '3/7 Installing dashboard and configuration'
+    if (Test-Path $WebRoot) { Remove-Item $WebRoot -Recurse -Force }
+    New-Item -ItemType Directory -Force -Path $WebRoot | Out-Null
+    Copy-Item (Join-Path $RepoRoot 'web\dist\*') $WebRoot -Recurse -Force
+    $oldData = $env:SEGO_DATA_DIR
+    $env:SEGO_DATA_DIR = $Data
+    try {
+        & (Join-Path $Bin 'sego.exe') --config $Config mode $Profile
+        if ($LASTEXITCODE -ne 0) { throw 'Failed to initialize SEGO configuration.' }
+    } finally { $env:SEGO_DATA_DIR = $oldData }
+
+    Step '4/7 Protecting server data'
+    & icacls $Data /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' | Out-Null
+
+    Step '5/7 Enabling automatic startup'
+    $TaskName = 'SEGO Server'
+    $Exe = Join-Path $Bin 'sego-server.exe'
+    $serverArg = "--config `"$Config`""
+    $action = New-ScheduledTaskAction -Execute $Exe -Argument $serverArg
+    $trigger = New-ScheduledTaskTrigger -AtStartup
+    $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+    Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Principal $principal -Description 'SEGO Server private cloud storage service' -Force | Out-Null
+    Start-ScheduledTask -TaskName $TaskName
+    Add-MachinePath $Bin
+
+    Step '6/7 Creating your administrator account'
+    & (Join-Path $Bin 'sego.exe') --config $Config setup
+    if ($LASTEXITCODE -ne 0) { throw 'Administrator setup failed.' }
+
+    Step '7/7 Checking SEGO'
+    & (Join-Path $Bin 'sego.exe') --config $Config doctor
+    if ($LASTEXITCODE -ne 0) { throw 'SEGO diagnostics failed.' }
+
+    Write-Host "`nSEGO Server is installed." -ForegroundColor Green
+    Write-Host 'Open SEGO:  sego open'
+    Write-Host 'Check SEGO: sego status'
+    Write-Host 'Help:       sego help'
+    Write-Host 'Dashboard:  http://127.0.0.1:8088'
+    try { Start-Process 'http://127.0.0.1:8088' } catch {}
+}
+finally { Pop-Location }

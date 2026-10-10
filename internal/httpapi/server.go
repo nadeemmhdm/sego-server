@@ -7,20 +7,20 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"mime"
 	"net/http"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/nadeemmhdm/sego-server/internal/audit"
 	"github.com/nadeemmhdm/sego-server/internal/auth"
 	"github.com/nadeemmhdm/sego-server/internal/config"
 	"github.com/nadeemmhdm/sego-server/internal/db"
 	"github.com/nadeemmhdm/sego-server/internal/diagnostics"
 	"github.com/nadeemmhdm/sego-server/internal/namespace"
+	"github.com/nadeemmhdm/sego-server/internal/securitylock"
 	"github.com/nadeemmhdm/sego-server/internal/share"
 	"github.com/nadeemmhdm/sego-server/internal/storage"
 )
@@ -58,6 +58,7 @@ func (s *Server) Router() http.Handler {
 	})
 	r.Post("/api/auth/login", s.login)
 	r.Get("/api/share/{token}/download", s.publicShareDownload)
+	r.Get("/api/preview/{token}", s.previewByToken)
 	r.Group(func(p chi.Router) {
 		p.Use(s.requireAuth)
 		p.Post("/api/auth/logout", s.logout)
@@ -66,12 +67,17 @@ func (s *Server) Router() http.Handler {
 		p.Post("/api/files/mkdir", s.mkdir)
 		p.Post("/api/files/upload", s.upload)
 		p.Get("/api/files/download", s.download)
+		p.Post("/api/files/preview-token", s.createPreviewToken)
 		p.Post("/api/files/rename", s.rename)
 		p.Delete("/api/files", s.trash)
 		p.Post("/api/shares", s.createShare)
 		p.Delete("/api/shares/{id}", s.revokeShare)
 		p.Get("/api/diagnostics", s.diag)
+		p.Get("/api/admin/security/status", s.adminSecurityStatus)
+		p.Post("/api/admin/emergency/activate", s.emergencyActivate)
+		p.Get("/api/admin/audit", s.auditList)
 	})
+	r.HandleFunc("/*", s.webUI)
 	return r
 }
 
@@ -88,12 +94,21 @@ func (s *Server) requestLog(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		next.ServeHTTP(w, r)
-		s.log.Info("http_request", "method", r.Method, "path", r.URL.Path, "duration_ms", time.Since(start).Milliseconds())
+		path := r.URL.Path
+		if rc := chi.RouteContext(r.Context()); rc != nil && rc.RoutePattern() != "" {
+			path = rc.RoutePattern()
+		}
+		// Route patterns prevent bearer-like share/preview tokens from entering logs.
+		s.log.Info("http_request", "method", r.Method, "path", path, "duration_ms", time.Since(start).Milliseconds())
 	})
 }
 
 func (s *Server) requireAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if securitylock.IsActive(r.Context(), s.db) {
+			problem(w, 423, "emergency lockdown active")
+			return
+		}
 		h := r.Header.Get("Authorization")
 		if !strings.HasPrefix(h, "Bearer ") {
 			problem(w, 401, "missing bearer token")
@@ -110,6 +125,10 @@ func (s *Server) requireAuth(next http.Handler) http.Handler {
 func currentUser(r *http.Request) db.User { return r.Context().Value(userKey).(db.User) }
 
 func (s *Server) login(w http.ResponseWriter, r *http.Request) {
+	if securitylock.IsActive(r.Context(), s.db) {
+		problem(w, 423, "emergency lockdown active; local CLI recovery is required")
+		return
+	}
 	if !s.allowLogin(r) {
 		problem(w, 429, "too many login attempts")
 		return
@@ -130,6 +149,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	validPassword := auth.VerifyPassword(verifyHash, in.Password)
 	if lookupErr != nil || !validPassword {
 		time.Sleep(250 * time.Millisecond)
+		s.auditActor(r, "login_failed", nil, in.Username, "", "authentication", "denied", map[string]any{"reason": "invalid_credentials"})
 		problem(w, 401, "invalid credentials")
 		return
 	}
@@ -145,9 +165,12 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.clearLogin(r)
+	uid := id
+	s.auditActor(r, "login_success", &uid, in.Username, role, "authentication", "success", nil)
 	writeJSON(w, 200, map[string]any{"token": plain, "expires_at": exp, "user": map[string]any{"id": id, "username": in.Username, "role": role, "quota_bytes": quota, "reserved_bytes": reserved}})
 }
 func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
+	s.auditUser(r, "logout", "authentication", "success", nil)
 	plain := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 	s.db.Exec(`DELETE FROM sessions WHERE token_hash=?`, auth.HashToken(plain))
 	w.WriteHeader(204)
@@ -184,6 +207,7 @@ func (s *Server) mkdir(w http.ResponseWriter, r *http.Request) {
 		problem(w, 400, err.Error())
 		return
 	}
+	s.auditUser(r, "folder_created", in.Path, "success", map[string]any{"root": in.Root})
 	w.WriteHeader(204)
 }
 
@@ -251,6 +275,7 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request) {
 		problem(w, 500, "metadata update failed")
 		return
 	}
+	s.auditUser(r, "file_uploaded", path, "success", map[string]any{"root": root, "size": n})
 	writeJSON(w, 201, map[string]any{"path": path, "size": n})
 }
 
@@ -263,7 +288,8 @@ func (s *Server) download(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer f.Close()
-	w.Header().Set("Content-Type", mime.TypeByExtension(filepath.Ext(info.Name())))
+	s.auditUser(r, "file_downloaded", path, "success", map[string]any{"root": root, "size": info.Size()})
+	w.Header().Set("Content-Type", contentTypeForDownload(info.Name()))
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename=%q`, sanitizeFilename(info.Name())))
 	w.Header().Set("Content-Length", strconv.FormatInt(info.Size(), 10))
 	io.Copy(w, f)
@@ -283,6 +309,7 @@ func (s *Server) rename(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.db.Exec(`UPDATE file_index SET rel_path=?,updated_at=? WHERE root_id=? AND rel_path=? AND owner_user_id=?`, toInternal, time.Now().UTC().Format(time.RFC3339), in.Root, fromInternal, u.ID)
+	s.auditUser(r, "file_renamed", in.To, "success", map[string]any{"root": in.Root, "from": in.From, "to": in.To})
 	w.WriteHeader(204)
 }
 func (s *Server) trash(w http.ResponseWriter, r *http.Request) {
@@ -295,6 +322,7 @@ func (s *Server) trash(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.db.Exec(`DELETE FROM file_index WHERE root_id=? AND (rel_path=? OR rel_path LIKE ?) AND owner_user_id=?`, root, internalPath, internalPath+"/%", u.ID)
+	s.auditUser(r, "item_moved_to_trash", path, "success", map[string]any{"root": root})
 	w.WriteHeader(204)
 }
 
@@ -330,6 +358,7 @@ func (s *Server) createShare(w http.ResponseWriter, r *http.Request) {
 		problem(w, 500, "share creation failed")
 		return
 	}
+	s.auditUser(r, "share_link_created", in.Path, "success", map[string]any{"root": in.Root, "expires_hours": in.ExpiresHours, "max_downloads": in.MaxDownloads})
 	writeJSON(w, 201, map[string]any{"token": token, "url": "/api/share/" + token + "/download"})
 }
 func (s *Server) revokeShare(w http.ResponseWriter, r *http.Request) {
@@ -338,9 +367,14 @@ func (s *Server) revokeShare(w http.ResponseWriter, r *http.Request) {
 		problem(w, 404, err.Error())
 		return
 	}
+	s.auditUser(r, "share_link_revoked", fmt.Sprintf("share:%d", id), "success", nil)
 	w.WriteHeader(204)
 }
 func (s *Server) publicShareDownload(w http.ResponseWriter, r *http.Request) {
+	if securitylock.IsActive(r.Context(), s.db) {
+		problem(w, 423, "emergency lockdown active")
+		return
+	}
 	rec, err := share.Resolve(r.Context(), s.db, chi.URLParam(r, "token"))
 	if err != nil {
 		problem(w, 404, "share unavailable")
@@ -360,6 +394,7 @@ func (s *Server) publicShareDownload(w http.ResponseWriter, r *http.Request) {
 		problem(w, 500, "share accounting failed")
 		return
 	}
+	_ = audit.Write(r.Context(), s.db, audit.Event{Action: "share_download", IP: clientIP(r), UserAgent: r.UserAgent(), Target: fmt.Sprintf("share:%d", rec.ID), Outcome: "success", Details: map[string]any{"size": info.Size()}})
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename=%q`, sanitizeFilename(info.Name())))
 	io.Copy(w, f)

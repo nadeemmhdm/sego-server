@@ -1,26 +1,32 @@
 # API Reference — MVP
 
-Base development address: `http://127.0.0.1:8088`
+Default local base address: `http://127.0.0.1:8088`
 
-Except for health, login, and authorized public share access, protected endpoints require:
+Protected endpoints require:
 
 ```http
 Authorization: Bearer <session-token>
 ```
 
+During Emergency SOS lockdown, login, authenticated endpoints, public shares, and preview-token access are blocked. Health remains available for local service diagnostics.
+
 ## Public endpoints
 
 ### `GET /api/health`
 
-Returns basic service health.
+Basic service health.
 
 ### `POST /api/auth/login`
 
-Authenticates a user and returns an opaque session token.
+Authenticates a user and returns an opaque session token. Login is rate-limited and disabled during emergency lockdown.
 
 ### `GET /api/share/{token}/download`
 
-Downloads an authorized shared file when the share is valid, not revoked, not expired, and within configured access policy.
+Downloads a valid authorized share. The backend validates revocation, expiry and configured limits.
+
+### `GET /api/preview/{token}`
+
+Streams an authorized temporary preview. Media uses HTTP Range support through `http.ServeContent`. Tokens are scoped to one stored file and expire automatically.
 
 ## Authenticated endpoints
 
@@ -30,11 +36,11 @@ Revokes the current session.
 
 ### `GET /api/me`
 
-Returns the current authenticated user.
+Returns the current user.
 
 ### `GET /api/files`
 
-Lists an authorized directory within the current user's namespace.
+Lists an authorized directory in the current user's namespace.
 
 ### `POST /api/files/mkdir`
 
@@ -42,32 +48,58 @@ Creates a directory.
 
 ### `POST /api/files/upload`
 
-Streams an upload subject to request-size, quota, concurrency, namespace, and storage-root checks.
+Streams an upload subject to request size, quota, concurrency and path-confinement checks.
 
 ### `GET /api/files/download`
 
-Streams an authorized file download.
+Streams an authorized download.
+
+### `POST /api/files/preview-token`
+
+Creates a temporary scoped preview URL for an explicitly supported safe preview type. Active HTML/SVG is not admitted as inline preview content.
 
 ### `POST /api/files/rename`
 
-Renames/moves an authorized item within permitted storage scope.
+Renames/moves an item within the user's allowed storage namespace.
 
 ### `DELETE /api/files`
 
-Moves an authorized item to trash according to the current MVP behavior.
+Moves an authorized item to SEGO trash according to current MVP behavior.
 
 ### `POST /api/shares`
 
-Creates a share record and returns the plaintext token once to the caller while persisting a token hash where practical.
+Creates a file share. Plaintext token is returned to the caller while a hash is persisted where practical.
 
 ### `DELETE /api/shares/{id}`
 
-Revokes a share owned by the authorized user/administrator according to backend policy.
+Revokes an authorized share.
 
 ### `GET /api/diagnostics`
 
-Returns resource/service diagnostics available to the application.
+Admin-only resource/service diagnostics.
+
+## Admin security endpoints
+
+### `GET /api/admin/security/status`
+
+Returns the global Emergency SOS state. Requires `admin` or `super_admin`.
+
+### `POST /api/admin/emergency/activate`
+
+Activates global emergency lockdown. This operation:
+
+- revokes every session;
+- revokes/expires existing share links;
+- deletes preview tokens;
+- blocks further login/authenticated access;
+- writes an audit event.
+
+There is intentionally no remote unlock endpoint. Unlock is local CLI + administrator-password recovery.
+
+### `GET /api/admin/audit?limit=100&offset=0`
+
+Returns recent audit events, including action, timestamp, actor details, IP, user agent, target, outcome and structured details. Requires `admin` or `super_admin`.
 
 ## Security requirements
 
-Clients must never assume a path is authorized because it appeared in the UI. The server remains responsible for authorization, namespace translation, quota enforcement, share validation, and path confinement.
+Clients must never infer authorization from UI visibility. Namespace translation, permission checks, quota enforcement, share validation, preview validation, emergency state and filesystem confinement remain server-side responsibilities.

@@ -1,107 +1,87 @@
-# Installation Guide
+# SEGO Server Installation
 
-## Source-install prerequisites
+For most users, installation is one command. You do not need to download the source code manually.
 
-The current installers build SEGO from source and therefore require:
+## Windows 10 / 11
 
-- Go 1.23+
-- a supported source checkout
-- administrator/root privileges for system-wide installation
+1. Open PowerShell.
+2. Paste this command:
 
-The frontend build is separate in the current MVP.
-
-## Linux
-
-Initially targeted distributions are Ubuntu Server and Debian with systemd.
-
-Low-resource profile:
-
-```bash
-sudo ./scripts/install.sh --profile low-resource --yes
+```powershell
+irm https://raw.githubusercontent.com/nadeemmhdm/sego-server/main/install.ps1 | iex
 ```
 
-Standard profile:
+3. Choose **Yes** when Windows asks for Administrator permission.
+4. Create your SEGO administrator username and password when prompted.
+5. The installer starts SEGO automatically and opens the dashboard.
 
-```bash
-sudo ./scripts/install.sh --profile standard --yes
-```
-
-Default locations:
+Afterwards:
 
 ```text
-/opt/sego/bin            binaries
-/etc/sego/sego.json      configuration
-/var/lib/sego            database and primary storage
-/etc/systemd/system      service unit
+sego open
+sego status
+sego start
+sego stop
 ```
 
-Create the first administrator after installation:
+If `sego` is not recognized in the same PowerShell window immediately after the first install, open a new PowerShell window once so Windows reloads the updated PATH.
+
+## Ubuntu / Debian
+
+Run as your normal user:
 
 ```bash
-sudo /opt/sego/bin/sego --config /etc/sego/sego.json admin create
+curl -fsSL https://raw.githubusercontent.com/nadeemmhdm/sego-server/main/install.sh | bash
 ```
 
-Check health:
+Do **not** put `sudo` in front of the command. SEGO asks for sudo only for package/service installation.
 
-```bash
-sudo /opt/sego/bin/sego --config /etc/sego/sego.json doctor
-systemctl status sego.service
-```
+The installer detects lower-memory machines automatically and selects Low Resource Mode when appropriate.
 
-## Windows
+## What is automatic
 
-Run PowerShell as Administrator from the repository root:
+The guided installer handles:
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\install.ps1 -Profile low-resource -Yes
-```
+- GitHub source download;
+- supported dependency installation;
+- verified Go toolchain installation on Linux when the installed Go version is too old;
+- frontend/backend build;
+- config/data directories;
+- automatic startup;
+- first administrator setup;
+- health checks;
+- PATH/launcher setup.
 
-Default locations:
+## Interrupted first setup
+
+If installation finished but the administrator prompt was skipped:
 
 ```text
-%ProgramFiles%\SEGO\bin
-%ProgramData%\SEGO\sego.json
-%ProgramData%\SEGO\storage
+sego setup
 ```
 
-Create the administrator:
-
-```powershell
-& "$env:ProgramFiles\SEGO\bin\sego.exe" --config "$env:ProgramData\SEGO\sego.json" admin create
-```
-
-Start the MVP server manually:
-
-```powershell
-& "$env:ProgramFiles\SEGO\bin\sego-server.exe" --config "$env:ProgramData\SEGO\sego.json"
-```
-
-Native Windows Service registration is intentionally documented as incomplete until the service-control integration is implemented and tested. The installer does not fake service success.
-
-## Uninstall
-
-Linux, preserving data by default:
+On Linux, if the protected database requires elevation:
 
 ```bash
-sudo ./scripts/uninstall.sh
+sudo sego setup
 ```
 
-Linux, including data/configuration:
+On Windows, open an Administrator PowerShell only for this recovery step.
+
+## Custom/advanced installation
+
+The repository-local installers still support advanced paths and profiles:
+
+Linux:
 
 ```bash
-sudo ./scripts/uninstall.sh --purge-data
+./scripts/install.sh --profile low-resource
 ```
 
-Windows, preserving data:
+Windows:
 
 ```powershell
-.\scripts\uninstall.ps1
+.\scripts\install.ps1 -Profile low-resource
 ```
 
-Windows, including data/configuration:
-
-```powershell
-.\scripts\uninstall.ps1 -PurgeData
-```
-
-Back up important data before any destructive uninstall option.
+Advanced options are intended for administrators and development environments, not normal first-time setup.

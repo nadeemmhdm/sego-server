@@ -1,29 +1,29 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PROFILE="low-resource"
+PROFILE="auto"
 YES=0
 PREFIX="${SEGO_PREFIX:-/opt/sego}"
 DATA="${SEGO_DATA:-/var/lib/sego}"
 CONFIG="${SEGO_CONFIG:-/etc/sego/sego.json}"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+GO_VERSION="1.27.2"
 
 usage() {
   cat <<'USAGE'
-SEGO Server installer (Linux)
+SEGO Server guided installer (Linux)
 
-Usage:
-  ./scripts/install.sh [--profile low-resource|standard] [--yes]
+Usually you do not need options. Just run the one-command installer from README.
 
 Options:
-  --profile NAME   Runtime profile. Default: low-resource
-  --prefix PATH    Binary installation root. Default: /opt/sego
-  --data PATH      Application data directory. Default: /var/lib/sego
-  --config PATH    Configuration path. Default: /etc/sego/sego.json
-  --yes            Non-interactive approval of the displayed install plan
-  -h, --help       Show this help
+  --profile auto|low-resource|standard   Default: auto
+  --yes                                  Skip install-plan confirmation
+  --prefix PATH                          Advanced: binary installation root
+  --data PATH                            Advanced: application data directory
+  --config PATH                          Advanced: configuration path
+  -h, --help                             Show this help
 USAGE
 }
-
 while (($#)); do
   case "$1" in
     --profile) PROFILE="${2:?missing profile}"; shift 2 ;;
@@ -35,97 +35,150 @@ while (($#)); do
     *) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
   esac
 done
-
-case "$PROFILE" in
-  low-resource|standard) ;;
-  *) echo "Invalid profile: $PROFILE" >&2; exit 2 ;;
-esac
-
-[[ "$(uname -s)" == "Linux" ]] || { echo "This installer is for Linux. Use scripts/install.ps1 on Windows." >&2; exit 1; }
+case "$PROFILE" in auto|low-resource|standard) ;; *) echo "Invalid profile: $PROFILE" >&2; exit 2 ;; esac
+[[ "$(uname -s)" == "Linux" ]] || { echo "This installer is for Linux. Use the Windows PowerShell installer on Windows." >&2; exit 1; }
 ARCH="$(uname -m)"
-case "$ARCH" in
-  x86_64|amd64|aarch64|arm64) ;;
-  *) echo "Unsupported architecture: $ARCH" >&2; exit 1 ;;
-esac
+case "$ARCH" in x86_64|amd64) GO_ARCH=amd64; GO_SHA="ecbadb99091a3f46e31f5f934b068b1864eafa7995211b39eaddf76996045fe5" ;; aarch64|arm64) GO_ARCH=arm64; GO_SHA="94f3e30b8e374bc285e7dadc11e0865726b9bc6e85b841ccceaabc0214c6b7c8" ;; *) echo "Unsupported architecture: $ARCH" >&2; exit 1 ;; esac
 
 if [[ -r /etc/os-release ]]; then
   # shellcheck disable=SC1091
   . /etc/os-release
-  case "${ID:-}" in
-    ubuntu|debian) ;;
-    *) echo "Warning: ${PRETTY_NAME:-this Linux distribution} is not in the initially tested Ubuntu/Debian support matrix." ;;
-  esac
+  case "${ID:-}" in ubuntu|debian) ;; *) echo "Warning: ${PRETTY_NAME:-this distribution} is outside the initially tested Ubuntu/Debian matrix." ;; esac
+fi
+if [[ $EUID -eq 0 ]]; then SUDO=(); else command -v sudo >/dev/null 2>&1 || { echo "sudo is required." >&2; exit 1; }; SUDO=(sudo); fi
+
+step(){ printf '\n[%s] %s\n' "$1" "$2"; }
+
+# Auto mode keeps the choice away from beginners while still protecting 4 GB-class systems.
+if [[ "$PROFILE" == "auto" ]]; then
+  mem_kb="$(awk '/MemTotal:/ {print $2; exit}' /proc/meminfo 2>/dev/null || true)"
+  if [[ -n "${mem_kb:-}" && "$mem_kb" -ge 6291456 ]]; then PROFILE="standard"; else PROFILE="low-resource"; fi
 fi
 
-command -v go >/dev/null 2>&1 || { echo "Go 1.23+ is required when installing from a source checkout." >&2; exit 1; }
-command -v systemctl >/dev/null 2>&1 || { echo "systemd is required by this source installer." >&2; exit 1; }
+# Bootstrap/build dependencies. Go itself is handled separately so Ubuntu/Debian
+# package versions cannot silently be too old for the project toolchain.
+missing=()
+for p in ca-certificates curl tar nodejs npm; do
+  case "$p" in
+    ca-certificates) dpkg -s ca-certificates >/dev/null 2>&1 || missing+=(ca-certificates) ;;
+    curl) command -v curl >/dev/null 2>&1 || missing+=(curl) ;;
+    tar) command -v tar >/dev/null 2>&1 || missing+=(tar) ;;
+    nodejs) command -v node >/dev/null 2>&1 || missing+=(nodejs) ;;
+    npm) command -v npm >/dev/null 2>&1 || missing+=(npm) ;;
+  esac
+done
+command -v systemctl >/dev/null 2>&1 || { echo "systemd is required by this installer." >&2; exit 1; }
+if ((${#missing[@]})); then
+  command -v apt-get >/dev/null 2>&1 || { printf 'Missing packages: %s\n' "${missing[*]}" >&2; exit 1; }
+  step "1/9" "Installing required system tools"
+  if [[ $YES -ne 1 ]]; then read -r -p "Install required packages? [Y/n] " a; [[ "${a:-y}" =~ ^([yY]|[yY][eE][sS])$ ]] || exit 1; fi
+  "${SUDO[@]}" apt-get update
+  "${SUDO[@]}" apt-get install -y "${missing[@]}"
+fi
 
-if [[ $EUID -eq 0 ]]; then
-  SUDO=()
-else
-  command -v sudo >/dev/null 2>&1 || { echo "sudo is required for system installation." >&2; exit 1; }
-  SUDO=(sudo)
+version_ge(){
+  # true when $1 >= $2, numeric dotted versions
+  [[ "$(printf '%s\n%s\n' "$2" "$1" | sort -V | head -n1)" == "$2" ]]
+}
+ensure_go(){
+  local have=""
+  if command -v go >/dev/null 2>&1; then have="$(go env GOVERSION 2>/dev/null | sed 's/^go//' || true)"; fi
+  if [[ -n "$have" ]] && version_ge "$have" "1.24.0"; then
+    echo "Go $have detected."
+    return
+  fi
+  step "2/9" "Installing verified Go $GO_VERSION toolchain"
+  local tmp archive url got
+  tmp="$(mktemp -d)"; archive="$tmp/go.tar.gz"
+  url="https://go.dev/dl/go${GO_VERSION}.linux-${GO_ARCH}.tar.gz"
+  curl -fL --retry 3 "$url" -o "$archive"
+  got="$(sha256sum "$archive" | awk '{print $1}')"
+  [[ "$got" == "$GO_SHA" ]] || { rm -rf "$tmp"; echo "Go download checksum verification failed." >&2; exit 1; }
+  "${SUDO[@]}" rm -rf /usr/local/go
+  "${SUDO[@]}" tar -C /usr/local -xzf "$archive"
+  rm -rf "$tmp"
+  export PATH="/usr/local/go/bin:$PATH"
+}
+ensure_go
+
+if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
+  echo "Node.js and npm are required after package installation." >&2; exit 1
+fi
+node_major="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)"
+if (( node_major < 18 )); then
+  echo "Node.js 18 or newer is required. Your distribution installed Node $(node --version)." >&2
+  echo "Update Node.js, then rerun the same SEGO install command." >&2
+  exit 1
 fi
 
 cat <<PLAN
-SEGO Server install plan
-  profile : $PROFILE
-  binaries: $PREFIX/bin
-  data    : $DATA
-  config  : $CONFIG
-  service : systemd (sego.service)
 
-The installer never formats or repartitions disks. Existing user data is preserved.
+SEGO is ready to install.
+  Mode       : $PROFILE
+  Dashboard  : http://127.0.0.1:8088
+  Data folder: $DATA
+  Startup    : automatic (systemd)
+
+No disk will be formatted or repartitioned. Existing SEGO user data is preserved.
 PLAN
+if [[ $YES -ne 1 ]]; then read -r -p "Continue? [Y/n] " a; [[ "${a:-y}" =~ ^([yY]|[yY][eE][sS])$ ]] || exit 0; fi
 
-if [[ $YES -ne 1 ]]; then
-  read -r -p "Continue? [y/N] " answer
-  [[ "${answer,,}" == "y" || "${answer,,}" == "yes" ]] || exit 0
-fi
+TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+cd "$REPO_ROOT"
 
-TMP="$(mktemp -d)"
-trap 'rm -rf "$TMP"' EXIT
+step "3/9" "Building the dashboard"
+(
+  cd web
+  npm install --no-audit --no-fund
+  npm run build
+)
 
-echo "[1/7] Building SEGO binaries"
+step "4/9" "Building SEGO"
 go build -trimpath -o "$TMP/sego-server" ./cmd/server
 go build -trimpath -o "$TMP/sego" ./cmd/sego
 
-echo "[2/7] Creating service account and directories"
-if ! id -u sego >/dev/null 2>&1; then
-  "${SUDO[@]}" useradd --system --home "$DATA" --shell /usr/sbin/nologin sego
-fi
+step "5/9" "Creating secure folders"
+if ! id -u sego >/dev/null 2>&1; then "${SUDO[@]}" useradd --system --home "$DATA" --shell /usr/sbin/nologin sego; fi
 "${SUDO[@]}" install -d -m 0755 "$PREFIX/bin" "$(dirname "$CONFIG")"
-"${SUDO[@]}" install -d -o sego -g sego -m 0750 "$DATA"
+"${SUDO[@]}" install -d -o sego -g sego -m 0750 "$DATA" "$DATA/web"
 
-echo "[3/7] Installing binaries"
+step "6/9" "Installing files and automatic startup"
 "${SUDO[@]}" install -m 0755 "$TMP/sego-server" "$PREFIX/bin/sego-server"
 "${SUDO[@]}" install -m 0755 "$TMP/sego" "$PREFIX/bin/sego"
+"${SUDO[@]}" ln -sf "$PREFIX/bin/sego" /usr/local/bin/sego
+"${SUDO[@]}" rm -rf "$DATA/web"
+"${SUDO[@]}" install -d -o sego -g sego -m 0750 "$DATA/web"
+"${SUDO[@]}" cp -a web/dist/. "$DATA/web/"
+"${SUDO[@]}" chown -R sego:sego "$DATA/web"
 
-echo "[4/7] Creating configuration and applying profile"
-"${SUDO[@]}" "$PREFIX/bin/sego" --config "$CONFIG" mode set "$PROFILE"
+"${SUDO[@]}" env SEGO_DATA_DIR="$DATA" "$PREFIX/bin/sego" --config "$CONFIG" mode "$PROFILE"
 "${SUDO[@]}" chown -R sego:sego "$DATA"
 "${SUDO[@]}" chown root:sego "$CONFIG"
 "${SUDO[@]}" chmod 0640 "$CONFIG"
 
-echo "[5/7] Installing systemd service"
-SERVICE_TMP="$TMP/sego.service"
-sed \
-  -e "s#/opt/sego/bin/sego-server#$PREFIX/bin/sego-server#g" \
-  -e "s#/etc/sego/sego.json#$CONFIG#g" \
-  -e "s#/var/lib/sego#$DATA#g" \
-  deploy/systemd/sego.service > "$SERVICE_TMP"
-"${SUDO[@]}" install -m 0644 "$SERVICE_TMP" /etc/systemd/system/sego.service
+sed -e "s#/opt/sego/bin/sego-server#$PREFIX/bin/sego-server#g" -e "s#/etc/sego/sego.json#$CONFIG#g" -e "s#/var/lib/sego#$DATA#g" deploy/systemd/sego.service > "$TMP/sego.service"
+"${SUDO[@]}" install -m 0644 "$TMP/sego.service" /etc/systemd/system/sego.service
 "${SUDO[@]}" systemctl daemon-reload
 "${SUDO[@]}" systemctl enable --now sego.service
 
-echo "[6/7] Running health diagnostics"
+step "7/9" "Checking the server"
 "${SUDO[@]}" "$PREFIX/bin/sego" --config "$CONFIG" doctor
-"${SUDO[@]}" systemctl --no-pager --full status sego.service >/dev/null || {
-  echo "SEGO service did not start successfully. Run: sudo journalctl -u sego.service -n 100 --no-pager" >&2
-  exit 1
-}
+"${SUDO[@]}" systemctl --no-pager --full is-active sego.service >/dev/null || { echo "SEGO could not start. Run: sudo journalctl -u sego.service -n 100 --no-pager" >&2; exit 1; }
 
-echo "[7/7] Installation complete"
-printf '\nCreate the first administrator:\n  sudo %q --config %q admin create\n' "$PREFIX/bin/sego" "$CONFIG"
-printf 'Dashboard/API (local): http://127.0.0.1:8088\n'
-printf 'Change resource mode later:\n  sudo %q --config %q mode set low-resource\n  sudo %q --config %q mode set standard\n' "$PREFIX/bin/sego" "$CONFIG" "$PREFIX/bin/sego" "$CONFIG"
+step "8/9" "Creating your administrator account"
+if [[ -t 0 ]]; then
+  "${SUDO[@]}" "$PREFIX/bin/sego" --config "$CONFIG" setup
+else
+  echo "No interactive terminal is available. After install run: sudo sego setup"
+fi
+
+step "9/9" "Installation complete"
+echo
+printf 'Open SEGO:  sego open\n'
+printf 'Check SEGO: sego status\n'
+printf 'Dashboard:  http://127.0.0.1:8088\n'
+printf 'Help:       sego help\n'
+
+if [[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]] && command -v xdg-open >/dev/null 2>&1; then
+  xdg-open http://127.0.0.1:8088 >/dev/null 2>&1 || true
+fi

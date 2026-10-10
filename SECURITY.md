@@ -40,6 +40,9 @@ SEGO follows these baseline rules:
 - no logging of passwords or full share tokens
 - no claim that a link is secure merely because it is difficult to guess
 - no unverified update package execution
+- scoped temporary preview tokens instead of bearer tokens in media URLs
+- Emergency SOS global session/link/preview revocation
+- administrator audit log with actor, IP, outcome and timestamp
 
 ## Deployment responsibility
 
@@ -49,6 +52,6 @@ Do not expose database, SSH, or local administrative ports through a public file
 
 ## Known incomplete controls
 
-MFA/TOTP, complete folder ACL inheritance, signed update/rollback automation, native Windows service hardening, and the full audit-monitoring layer are roadmap items. Do not assume they are already present.
+MFA/TOTP, complete folder ACL inheritance, signed update/rollback automation, native Windows service hardening, centralized alerting/SIEM export, and complete security-regression coverage remain roadmap items. Do not assume they are already present.
 
 See [`docs/SECURITY-HARDENING.md`](docs/SECURITY-HARDENING.md) and [`docs/THREAT-MODEL.md`](docs/THREAT-MODEL.md).

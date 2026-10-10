@@ -1,65 +1,60 @@
-# CLI Reference
+# SEGO CLI
 
-The CLI executable is named `sego`.
+The CLI is designed so normal users do not need to know configuration paths.
 
-## Global option
+## Everyday commands
 
 ```text
---config PATH   Path to the SEGO JSON configuration file
+sego open       Start SEGO if necessary and open the dashboard
+sego status     Show local server/service status
+sego start      Start the background server
+sego stop       Stop the background server
+sego restart    Restart the background server
+sego help       Show help
 ```
 
-## Implemented MVP commands
+On Windows, service-control commands can display the normal UAC prompt when elevation is required. On Linux, sudo can request the user's password when service control requires it.
 
-### Status
+## Setup / diagnostics
 
-```bash
-sego --config sego.json status
+```text
+sego setup
+sego doctor
+sego storage list
 ```
 
-Shows the listen address, database path, storage-root count, and active resource mode.
+`sego setup` creates the first administrator if one does not already exist.
 
-### Doctor
+## Emergency recovery
 
-```bash
-sego --config sego.json doctor
+```text
+sego emergency status
+sego emergency unlock
 ```
 
-Checks configuration and storage-root accessibility.
+Unlock is intentionally a local CLI operation and verifies an administrator password.
 
-### Storage list
+## Performance mode
 
-```bash
-sego --config sego.json storage list
+```text
+sego mode show
+sego mode low-resource
+sego mode standard
 ```
 
-Lists configured storage roots.
+The older explicit syntax is also accepted:
 
-### Create administrator
-
-```bash
-sego --config sego.json admin create
+```text
+sego mode set low-resource
+sego mode set standard
 ```
 
-Interactively creates a Super Admin. Password input is not designed to be passed through command-line arguments.
+## Advanced custom config
 
-### Show mode
+Custom deployments can still specify a path explicitly:
 
-```bash
-sego --config sego.json mode show
+```text
+sego --config /custom/path/sego.json doctor
 ```
 
-### Set low-resource mode
-
-```bash
-sego --config sego.json mode set low-resource
-```
-
-### Set standard mode
-
-```bash
-sego --config sego.json mode set standard
-```
-
-## Planned commands
-
-The project specification also calls for tunnel setup/status, update check/apply, backup/restore, logs, and full uninstall management. These remain roadmap items until implemented and tested.
+Normal installations should not need this option.

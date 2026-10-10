@@ -1,0 +1,19 @@
+[Unit]
+Description=SEGO Server release updater
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/opt/sego/bin/sego-updater --config /etc/sego/sego.json
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/opt/sego /var/lib/sego /etc/sego
+
+[Install]
+WantedBy=multi-user.target

@@ -1,51 +1,42 @@
-# Installation Details
+# Installation Reference
 
-## Installation philosophy
+For beginner installation, use the one-command instructions in [`GETTING-STARTED.md`](GETTING-STARTED.md).
 
-SEGO installation must be idempotent where practical, must not format or repartition disks, and must not run unverified remote scripts with elevated privileges.
+## Direct GitHub bootstrap
 
-The current MVP source installers build from the local checkout. They do not download a claimed release binary that has not been signed and published.
+Windows:
 
-## Linux flow
+```powershell
+irm https://raw.githubusercontent.com/nadeemmhdm/sego-server/main/install.ps1 | iex
+```
 
-The Linux installer:
+Linux:
 
-1. validates Linux and architecture
-2. identifies the distribution when possible
-3. verifies Go and systemd are available
-4. shows the install plan
-5. builds `sego-server` and `sego`
-6. creates the restricted `sego` service account
-7. creates application directories
-8. initializes configuration
-9. applies the selected resource mode
-10. installs/enables the systemd service
-11. runs diagnostics and service health checks
+```bash
+curl -fsSL https://raw.githubusercontent.com/nadeemmhdm/sego-server/main/install.sh | bash
+```
 
-## Windows flow
+The bootstrap resolves the current `main` commit, downloads that source snapshot to a temporary directory, and runs the platform-local installer from the downloaded snapshot. The Linux bootstrap should be started as a normal user rather than with sudo.
 
-The Windows installer:
+## Automatic profile selection
 
-1. verifies elevated PowerShell
-2. verifies Go is available
-3. shows the install plan
-4. builds `sego-server.exe` and `sego.exe`
-5. initializes configuration
-6. applies the resource mode
-7. runs diagnostics
+`auto` is the default. Systems below approximately 6 GiB RAM use `low-resource`; larger systems use `standard` unless the operator explicitly chooses a profile.
 
-Native Windows Service installation is still pending implementation and validation.
+## Linux layout
 
-## Profiles
+- binaries: `/opt/sego/bin`
+- simple CLI symlink: `/usr/local/bin/sego`
+- config: `/etc/sego/sego.json`
+- application data: `/var/lib/sego`
+- service: `sego.service`
 
-`low-resource`:
+## Windows layout
 
-- low-resource mode enabled
-- upload concurrency reduced to 1
-- recommended default on older hardware
+- binaries: `%ProgramFiles%\SEGO\bin`
+- config/data: `%ProgramData%\SEGO`
+- startup: `SEGO Server` Scheduled Task in the current MVP
+- binary directory is added to machine PATH
 
-`standard`:
+## Source checkout installation
 
-- low-resource mode disabled
-- upload concurrency raised to at least 3
-- intended for systems with more resource headroom
+Developers/advanced operators can run `scripts/install.sh` or `scripts/install.ps1` directly from a checkout. See each script's help/options.

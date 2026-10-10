@@ -1,0 +1,12 @@
+[Unit]
+Description=Check GitHub Releases for SEGO updates
+
+[Timer]
+OnBootSec=15min
+OnUnitActiveSec=24h
+RandomizedDelaySec=2h
+Persistent=true
+Unit=sego-update.service
+
+[Install]
+WantedBy=timers.target

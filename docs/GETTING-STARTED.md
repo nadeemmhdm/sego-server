@@ -1,47 +1,83 @@
 # Getting Started
 
-## 1. Choose a mode
+This page is intentionally written for first-time users.
 
-Use `low-resource` for older or 4 GB-class systems. Use `standard` when the host has more CPU/RAM headroom.
+## 1. Install
 
-## 2. Install
+### Windows
 
-Linux:
-
-```bash
-sudo ./scripts/install.sh --profile low-resource --yes
-```
-
-Windows (elevated PowerShell):
+Open PowerShell and paste:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\install.ps1 -Profile low-resource -Yes
+irm https://raw.githubusercontent.com/nadeemmhdm/sego-server/main/install.ps1 | iex
 ```
 
-## 3. Create the administrator
+### Ubuntu / Debian
 
-Linux:
+Open Terminal and paste:
 
 ```bash
-sudo /opt/sego/bin/sego --config /etc/sego/sego.json admin create
+curl -fsSL https://raw.githubusercontent.com/nadeemmhdm/sego-server/main/install.sh | bash
 ```
 
-Windows:
+The installer downloads SEGO from GitHub. You do not need to clone the repository or manually download a ZIP.
 
-```powershell
-& "$env:ProgramFiles\SEGO\bin\sego.exe" --config "$env:ProgramData\SEGO\sego.json" admin create
+## 2. Create the administrator
+
+The installation wizard asks for:
+
+- an admin username;
+- a password of at least 12 characters;
+- password confirmation.
+
+No default password is created.
+
+## 3. Open SEGO
+
+Use:
+
+```text
+sego open
 ```
 
-## 4. Verify health
+Or open this address manually:
 
-```bash
-sego --config /path/to/sego.json doctor
+```text
+http://127.0.0.1:8088
 ```
 
-## 5. Keep it local first
+## 4. Everyday commands
 
-Validate authentication, file listing, upload/download, quota behavior, and backups before adding any public tunnel or reverse proxy.
+```text
+sego open       Open dashboard
+sego status     Check server
+sego start      Start server
+sego stop       Stop server
+sego restart    Restart server
+sego help       Help
+```
 
-## 6. Read the security docs
+## 5. Upload and preview files
 
-Review `SECURITY.md`, `docs/THREAT-MODEL.md`, and `docs/SECURITY-HARDENING.md` before exposing SEGO outside a trusted LAN.
+Sign in, open **Files**, then choose **Upload**. Click a supported file to preview it. Supported browser codecs can play audio and video directly with seeking.
+
+## 6. Security emergency
+
+Admins can open **Security** and use **Emergency SOS** if an active compromise is suspected. It immediately blocks access and revokes sessions/links.
+
+To recover on the server computer:
+
+```text
+sego emergency unlock
+```
+
+## 7. If something does not work
+
+Run:
+
+```text
+sego status
+sego doctor
+```
+
+Then see [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md).

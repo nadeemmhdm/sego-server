@@ -46,12 +46,14 @@ Remaining: registered-user/group sharing, complete folder sharing, inheritance r
 
 ## Phase 5 — Preview, sorting and search
 
-**Status: pending expansion**
+**Status: partial / MVP preview implemented**
 
-- safe preview pipeline
-- thumbnails
-- richer server-side sort/filter/search
-- optional content indexing
+- scoped safe preview tokens
+- image/PDF/text previews
+- browser audio/video player with Range support
+- active HTML/SVG inline preview denied
+
+Remaining: thumbnails, richer server-side sort/filter/search, optional content indexing, and isolated Office conversion.
 
 ## Phase 6 — Remote access
 
@@ -64,12 +66,15 @@ Remaining: registered-user/group sharing, complete folder sharing, inheritance r
 
 ## Phase 7 — UI and accessibility
 
-**Status: partial**
+**Status: partial / functional MVP**
 
-- React/TypeScript/Vite dashboard foundation
-- responsive layout foundation
+- React/TypeScript/Vite dashboard
+- responsive file manager
+- preview modal/player
+- admin Security view with Emergency SOS
+- audit log list + detail view
 
-Remaining: complete file manager interactions, polished motion, low-resource visual reductions, advanced accessibility verification.
+Remaining: complete file-manager interactions, polished motion, low-resource visual reductions, and advanced accessibility verification.
 
 ## Phase 8 — Updates, backup and recovery
 

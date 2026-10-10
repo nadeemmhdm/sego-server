@@ -19,16 +19,17 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.23.x'
+          go-version: '1.27.2'
           cache: true
       - name: Test
         run: go test ./...
       - name: Vet
         run: go vet ./...
-      - name: Build server
-        run: go build ./cmd/server
-      - name: Build CLI
-        run: go build ./cmd/sego
+      - name: Build binaries
+        run: |
+          go build ./cmd/server
+          go build ./cmd/sego
+          go build ./cmd/updater
 
   frontend:
     name: Web build
@@ -40,7 +41,7 @@ jobs:
           node-version: '22'
       - name: Install dependencies
         working-directory: web
-        run: npm install
+        run: npm install --no-audit --no-fund
       - name: Build
         working-directory: web
         run: npm run build
@@ -51,11 +52,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Bash syntax
-        run: bash -n scripts/install.sh scripts/uninstall.sh
+        run: bash -n install.sh scripts/install.sh scripts/uninstall.sh scripts/bootstrap.sh scripts/install-update-service.sh
       - name: PowerShell parser
         shell: pwsh
         run: |
-          $files = @('scripts/install.ps1','scripts/uninstall.ps1')
+          $files = @('install.ps1','scripts/install.ps1','scripts/uninstall.ps1','scripts/bootstrap.ps1','scripts/install-update-service.ps1')
           foreach ($file in $files) {
             $tokens = $null
             $errors = $null
