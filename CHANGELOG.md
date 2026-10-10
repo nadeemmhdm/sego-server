@@ -8,7 +8,7 @@ SEGO Server is pre-1.0. This changelog records meaningful development milestones
 
 - direct one-command GitHub installers for Windows and Linux
 - automatic performance-mode selection
-- simplified `sego open/start/stop/restart/status/help` commands
+- beginner command aliases: `sego`, `sego update`, `sego remote`, `sego unlock`, `sego low`, `sego normal`, and `sego check`
 - automatic PATH/launcher setup
 - verified Go toolchain fallback on Linux when the system Go is too old
 - authorized image/PDF/text/audio/video previews
@@ -22,7 +22,9 @@ SEGO Server is pre-1.0. This changelog records meaningful development milestones
 
 ### Changed
 
-- aligned CI/toolchain minimums with dependency requirements
+- GitHub Actions updated to current v7 action generations
+- Dependabot updates grouped by ecosystem to reduce duplicate PR noise
+- CI resolves module checksums before Go tests/builds
 - improved beginner setup guidance and installation documentation
 - improved preview/download error handling in the web UI
 

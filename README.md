@@ -1,214 +1,146 @@
 # SEGO Server
 
-**SEGO Server** is an open-source, self-hosted private cloud that turns an existing Windows or Linux computer into a secure personal or small-team file server.
+**SEGO Server** is an open-source, self-hosted private cloud that turns a Windows or Linux computer into a secure personal or small-team file server.
 
-It is designed for local ownership, low-resource machines, streaming file I/O, server-side authorization, safe sharing, auditability, emergency containment, simple installation, boot-time availability, and recoverable updates.
+SEGO focuses on simple installation, local ownership, low resource use, streaming file I/O, server-side authorization, safe sharing, auditability, emergency containment, automatic startup and recoverable updates.
 
-> **Project stage:** secure MVP under active development. Features marked as roadmap are not presented as production-complete.
+> **Project stage:** secure MVP under active development. Roadmap features are not presented as production-complete.
 
-## Install — one command
+## Install in one command
 
-You do **not** need to clone the repository or download a ZIP first.
+You do **not** need to clone GitHub, download a ZIP, install the source manually, or type build commands.
 
 ### Windows 10 / 11
 
-Open PowerShell and paste:
+Open **PowerShell** and paste one command:
 
 ```powershell
 irm https://raw.githubusercontent.com/nadeemmhdm/sego-server/main/install.ps1 | iex
 ```
 
+Approve the Windows Administrator prompt when it appears. SEGO downloads itself directly from GitHub and guides you through the first admin account.
+
 ### Ubuntu / Debian
 
-Open Terminal as your normal user and paste:
+Open **Terminal** as your normal user and paste one command:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/nadeemmhdm/sego-server/main/install.sh | bash
 ```
 
-Do not prefix the Linux command with `sudo`; the installer asks only when elevated access is required.
+Do not add `sudo` in front. The installer asks for sudo only when the operating system requires it.
 
-The guided installer downloads SEGO from GitHub, installs supported prerequisites, chooses a resource profile, builds the dashboard/backend, creates automatic startup, creates the first admin account, enables automatic GitHub Release update checks, starts the server, and shows the dashboard address.
+### What the installer handles automatically
 
-## Beginner commands
+It downloads the current GitHub source snapshot, installs supported prerequisites, selects a low-resource or standard profile, resolves Go dependencies, builds the web dashboard and binaries, creates protected data/config folders, enables boot startup and update checks, creates the first Super Admin, starts SEGO and performs health checks.
 
-After installation, normal use is deliberately small:
+## Beginner use
 
-```text
-sego open          Open the dashboard
-sego status        Check the server
-sego start         Start SEGO
-sego stop          Stop SEGO
-sego restart       Restart SEGO
-sego help          Show commands
-```
-
-No config path is required for these commands.
-
-## Starts automatically after reboot
-
-SEGO is installed as a boot-start background service/task:
-
-- Linux: `sego.service` through systemd
-- Windows: `SEGO Server` startup task running as SYSTEM in the current MVP
-
-After the machine restarts, users do not need to open a terminal to start the server.
-
-## Optional remote access with Cloudflare Tunnel
-
-Run once:
+After installation, the shortest workflow is:
 
 ```text
-sego tunnel setup
+sego             Open SEGO in your browser
+sego status      Check whether SEGO is running
+sego update      Install an available verified release update
+sego remote      Set up Cloudflare Tunnel remote access
+sego unlock      Recover locally after Emergency SOS
+sego help        Show the full command list
 ```
 
-The command installs/configures `cloudflared` as an OS service. The tunnel token is entered through a hidden prompt instead of being typed into command history. Configure the Cloudflare published application to point to:
+Useful service commands remain simple:
 
 ```text
-http://localhost:8088
+sego start
+sego stop
+sego restart
 ```
 
-After setup, the tunnel service reconnects automatically when the computer boots.
+The longer administrator commands continue to work for compatibility, but beginners do not need to memorize them.
 
-Other commands:
+## Starts automatically
 
-```text
-sego tunnel status
-sego tunnel remove
-```
+SEGO starts with the computer after installation:
 
-Never publish SQLite, SSH, database, or unrelated administrative ports through the SEGO hostname.
+- Linux: systemd `sego.service`
+- Windows: `SEGO Server` startup task in the current MVP
 
-## Automatic release updates
+Normally a user only needs to run `sego` to open the dashboard.
 
-SEGO checks the repository's **GitHub Releases** channel automatically after installation.
+## Main capabilities
 
-```text
-sego version
-sego update check
-sego update auto
-```
-
-Automatic checks run at boot/daily depending on OS. The updater requires a matching platform package and `SHA256SUMS` asset, verifies the package checksum before installation, stops the server only after download/verification, keeps a local backup, restarts SEGO, performs a health check, and attempts rollback if the updated server fails health validation.
-
-Source-branch changes are not silently treated as releases. If no GitHub Release has been published, the updater makes no installation change.
-
-## Current capabilities
-
-### Storage
+### Files and storage
 
 - native filesystem storage roots
 - per-user internal namespaces
 - traversal and symlink-chain protection
 - streaming upload/download
-- folder creation, rename, listing and trash
+- folders, rename, listing and trash
 - quota reservation
 - expiring/revocable file share links
 
-### Safe file previews
+### Safe previews and media player
 
-- image preview: JPEG, PNG, WebP, GIF, BMP, ICO
-- PDF preview
-- text/Markdown/JSON/CSV/log/source preview
-- audio player: MP3, WAV, OGG, M4A, AAC, FLAC where browser codecs support them
-- video player: MP4, WebM, OGV, MOV, M4V where browser codecs support them
-- HTTP Range serving for seeking in media
-- short-lived scoped preview URLs instead of login bearer tokens in media URLs
-- active HTML/SVG is not admitted as inline preview content
-- graceful preview-error state instead of a broken-image/player UI
+- images: JPEG, PNG, WebP, GIF, BMP, ICO
+- PDF
+- text, Markdown, JSON, CSV, logs and source files
+- audio player for common browser-supported formats
+- video player for MP4, WebM, OGV, MOV and M4V when the browser supports the codec
+- HTTP Range requests for media seeking
+- short-lived scoped preview URLs instead of exposing the login bearer token
+- HTML/SVG active content is not rendered as an inline preview
+- graceful preview-error UI instead of broken image/player states
 
 ### Emergency SOS
 
-Admins have an **Emergency SOS** action for suspected compromise.
+Admins can activate **Emergency SOS** during a suspected compromise. One action enables global lockdown, revokes all sessions, blocks remote login/API access, revokes and expires share links, invalidates preview tokens and writes the event to the audit log.
 
-Activation immediately:
-
-- enables global lockdown;
-- revokes every active session, including the activating admin;
-- blocks new remote logins and authenticated API use;
-- revokes/expires all existing share links;
-- invalidates temporary preview tokens;
-- records the incident in the audit log.
-
-Recovery is intentionally local-only:
+Recovery is intentionally local-only. On the server computer run:
 
 ```text
-sego emergency unlock
+sego unlock
 ```
 
-The local command verifies an administrator password. Old share links are **not** restored after recovery.
+The admin password is verified before lockdown is removed. Revoked share links remain revoked.
 
 ### Audit logs
 
-Admins can view a structured audit list and open each entry for details including:
+The admin Audit Logs view shows action, date/time, user identity and role when available, client IP, user agent, target/resource, outcome and structured details. Secrets and full tokens are not intentionally logged.
 
-- action name
-- date/time
-- username/user ID/role
-- client IP
-- user agent
-- target/resource
-- result/outcome
-- structured event details
+## Performance modes
 
-Secrets, plaintext passwords, full share tokens, and full preview tokens are not intentionally written to the audit log.
-
-## Low-resource mode
-
-The installer chooses `low-resource` automatically on smaller-memory systems. It can be changed later:
+SEGO selects a suitable mode during installation. Manual aliases are available:
 
 ```text
-sego mode show
-sego mode low-resource
-sego mode standard
+sego low        Use Low Resource Mode
+sego normal     Use Standard Mode
 ```
 
-SEGO does not claim a certified 4 GB performance target until real-hardware benchmark results are published.
-
-## Architecture
-
-- backend/API/CLI: Go
-- metadata/auth/audit: SQLite
-- file contents: native filesystem
-- frontend: React + TypeScript + Vite
-- Linux startup: systemd
-- Windows startup: Task Scheduler in the current MVP
-- optional remote access: Cloudflare Tunnel service
+SEGO does not claim certified 4 GB performance until real-hardware benchmarks are published.
 
 ## Documentation
 
-Start with [`docs/GETTING-STARTED.md`](docs/GETTING-STARTED.md).
+Start here: [`docs/GETTING-STARTED.md`](docs/GETTING-STARTED.md)
 
 - [`INSTALL.md`](INSTALL.md)
 - [`SECURITY.md`](SECURITY.md)
 - [`ARCHITECTURE.md`](ARCHITECTURE.md)
-- [`CONTRIBUTING.md`](CONTRIBUTING.md)
-- [`TEST-REPORT.md`](TEST-REPORT.md)
+- [`docs/CLI.md`](docs/CLI.md)
 - [`docs/PREVIEWS.md`](docs/PREVIEWS.md)
 - [`docs/EMERGENCY-SOS.md`](docs/EMERGENCY-SOS.md)
 - [`docs/AUDIT-LOGS.md`](docs/AUDIT-LOGS.md)
 - [`docs/TUNNEL.md`](docs/TUNNEL.md)
 - [`docs/UPDATES.md`](docs/UPDATES.md)
-- [`docs/API.md`](docs/API.md)
-- [`docs/CLI.md`](docs/CLI.md)
 - [`docs/THREAT-MODEL.md`](docs/THREAT-MODEL.md)
 
 ## Not yet production-complete
 
-- MFA/TOTP
-- complete user/group/folder ACL inheritance
-- resumable multipart uploads
-- isolated Office-document conversion preview
-- full backup/restore scheduler and encrypted backup orchestration
-- native signed Windows Service installer
-- cryptographically signed release manifest beyond GitHub transport + SHA-256 asset validation
-- complete clean-machine Windows/Linux and 4 GB hardware certification
+MFA/TOTP, complete user/group/folder ACL inheritance, resumable multipart uploads, isolated Office conversion previews, full backup/restore orchestration, a native signed Windows Service installer, a cryptographically signed release manifest beyond GitHub transport plus SHA-256 asset validation, and complete clean-machine/4 GB hardware certification remain roadmap work.
 
 See [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 ## Verification policy
 
-SEGO does not claim that a test, platform target, performance target, security control, release, or rollback passed unless the relevant check was actually executed and documented.
+SEGO does not claim a test, platform target, performance target, security control, release or rollback passed unless the relevant check was actually executed and documented.
 
 ## License
 

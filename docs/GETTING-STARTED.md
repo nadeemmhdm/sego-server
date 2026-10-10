@@ -1,8 +1,8 @@
 # Getting Started
 
-This page is intentionally written for first-time users.
+This guide is for first-time users. You only need one install command and a few short SEGO commands.
 
-## 1. Install
+## Step 1 — Install
 
 ### Windows
 
@@ -12,6 +12,8 @@ Open PowerShell and paste:
 irm https://raw.githubusercontent.com/nadeemmhdm/sego-server/main/install.ps1 | iex
 ```
 
+Approve the Administrator prompt.
+
 ### Ubuntu / Debian
 
 Open Terminal and paste:
@@ -20,58 +22,50 @@ Open Terminal and paste:
 curl -fsSL https://raw.githubusercontent.com/nadeemmhdm/sego-server/main/install.sh | bash
 ```
 
-The installer downloads SEGO from GitHub. You do not need to clone the repository or manually download a ZIP.
+Do not manually download a ZIP or clone the repository. The installer retrieves SEGO directly from GitHub.
 
-## 2. Create the administrator
+## Step 2 — Create the administrator
 
-The installation wizard asks for:
+When asked, enter an admin username and a password of at least 12 characters. SEGO does not create a default password.
 
-- an admin username;
-- a password of at least 12 characters;
-- password confirmation.
+## Step 3 — Open SEGO
 
-No default password is created.
-
-## 3. Open SEGO
-
-Use:
+After installation simply run:
 
 ```text
-sego open
+sego
 ```
 
-Or open this address manually:
+This starts SEGO if necessary and opens the dashboard. The local address is `http://127.0.0.1:8088`.
+
+## Commands worth remembering
 
 ```text
-http://127.0.0.1:8088
+sego             Open dashboard
+sego status      Check server
+sego update      Update SEGO
+sego remote      Set up remote access
+sego unlock      Recover after Emergency SOS
+sego help        Show all commands
 ```
 
-## 4. Everyday commands
+Service controls are also available: `sego start`, `sego stop`, and `sego restart`.
+
+## Files and previews
+
+Sign in, open **Files**, and choose **Upload**. Click a supported file to preview it. Supported audio/video files use the built-in browser player and allow seeking when the browser codec supports the file.
+
+## Emergency SOS
+
+If a security incident is suspected, an admin can open **Security** and activate **Emergency SOS**. It blocks access and revokes active sessions and links.
+
+Recovery must be performed locally on the server computer:
 
 ```text
-sego open       Open dashboard
-sego status     Check server
-sego start      Start server
-sego stop       Stop server
-sego restart    Restart server
-sego help       Help
+sego unlock
 ```
 
-## 5. Upload and preview files
-
-Sign in, open **Files**, then choose **Upload**. Click a supported file to preview it. Supported browser codecs can play audio and video directly with seeking.
-
-## 6. Security emergency
-
-Admins can open **Security** and use **Emergency SOS** if an active compromise is suspected. It immediately blocks access and revokes sessions/links.
-
-To recover on the server computer:
-
-```text
-sego emergency unlock
-```
-
-## 7. If something does not work
+## Troubleshooting
 
 Run:
 

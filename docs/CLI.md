@@ -1,57 +1,61 @@
 # SEGO CLI
 
-The CLI is designed so normal users do not need to know configuration paths.
+SEGO keeps common commands short. Normal users do not need to know configuration paths.
 
-## Everyday commands
+## Beginner commands
 
 ```text
-sego open       Start SEGO if necessary and open the dashboard
-sego status     Show local server/service status
-sego start      Start the background server
-sego stop       Stop the background server
-sego restart    Restart the background server
-sego help       Show help
+sego             Start SEGO if needed and open the dashboard
+sego status      Show server/service status
+sego update      Run the installed release updater
+sego remote      Start the guided Cloudflare Tunnel setup
+sego unlock      Local Emergency SOS recovery
+sego help        Show the complete command list
 ```
 
-On Windows, service-control commands can display the normal UAC prompt when elevation is required. On Linux, sudo can request the user's password when service control requires it.
-
-## Setup / diagnostics
+Service controls:
 
 ```text
+sego start
+sego stop
+sego restart
+```
+
+Performance shortcuts:
+
+```text
+sego low         Low Resource Mode
+sego normal      Standard Mode
+```
+
+`sego check` is an alias for `sego status`.
+
+## Administrator / compatibility commands
+
+The explicit commands remain available for scripts and administrators:
+
+```text
+sego open
 sego setup
 sego doctor
 sego storage list
-```
-
-`sego setup` creates the first administrator if one does not already exist.
-
-## Emergency recovery
-
-```text
+sego tunnel setup
+sego tunnel status
+sego tunnel remove
+sego update check
+sego update auto
 sego emergency status
 sego emergency unlock
-```
-
-Unlock is intentionally a local CLI operation and verifies an administrator password.
-
-## Performance mode
-
-```text
 sego mode show
 sego mode low-resource
 sego mode standard
 ```
 
-The older explicit syntax is also accepted:
+On Windows, service-control commands can show a UAC prompt. On Linux, sudo can request the user's password when the operating system requires elevation.
 
-```text
-sego mode set low-resource
-sego mode set standard
-```
+## Advanced custom configuration
 
-## Advanced custom config
-
-Custom deployments can still specify a path explicitly:
+Custom deployments can still use:
 
 ```text
 sego --config /custom/path/sego.json doctor
