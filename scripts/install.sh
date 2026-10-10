@@ -49,14 +49,11 @@ if [[ $EUID -eq 0 ]]; then SUDO=(); else command -v sudo >/dev/null 2>&1 || { ec
 
 step(){ printf '\n[%s] %s\n' "$1" "$2"; }
 
-# Auto mode keeps the choice away from beginners while still protecting 4 GB-class systems.
 if [[ "$PROFILE" == "auto" ]]; then
   mem_kb="$(awk '/MemTotal:/ {print $2; exit}' /proc/meminfo 2>/dev/null || true)"
   if [[ -n "${mem_kb:-}" && "$mem_kb" -ge 6291456 ]]; then PROFILE="standard"; else PROFILE="low-resource"; fi
 fi
 
-# Bootstrap/build dependencies. Go itself is handled separately so Ubuntu/Debian
-# package versions cannot silently be too old for the project toolchain.
 missing=()
 for p in ca-certificates curl tar nodejs npm; do
   case "$p" in
@@ -76,40 +73,26 @@ if ((${#missing[@]})); then
   "${SUDO[@]}" apt-get install -y "${missing[@]}"
 fi
 
-version_ge(){
-  # true when $1 >= $2, numeric dotted versions
-  [[ "$(printf '%s\n%s\n' "$2" "$1" | sort -V | head -n1)" == "$2" ]]
-}
+version_ge(){ [[ "$(printf '%s\n%s\n' "$2" "$1" | sort -V | head -n1)" == "$2" ]]; }
 ensure_go(){
   local have=""
   if command -v go >/dev/null 2>&1; then have="$(go env GOVERSION 2>/dev/null | sed 's/^go//' || true)"; fi
-  if [[ -n "$have" ]] && version_ge "$have" "1.24.0"; then
-    echo "Go $have detected."
-    return
-  fi
+  if [[ -n "$have" ]] && version_ge "$have" "1.24.0"; then echo "Go $have detected."; return; fi
   step "2/9" "Installing verified Go $GO_VERSION toolchain"
   local tmp archive url got
-  tmp="$(mktemp -d)"; archive="$tmp/go.tar.gz"
-  url="https://go.dev/dl/go${GO_VERSION}.linux-${GO_ARCH}.tar.gz"
+  tmp="$(mktemp -d)"; archive="$tmp/go.tar.gz"; url="https://go.dev/dl/go${GO_VERSION}.linux-${GO_ARCH}.tar.gz"
   curl -fL --retry 3 "$url" -o "$archive"
   got="$(sha256sum "$archive" | awk '{print $1}')"
   [[ "$got" == "$GO_SHA" ]] || { rm -rf "$tmp"; echo "Go download checksum verification failed." >&2; exit 1; }
   "${SUDO[@]}" rm -rf /usr/local/go
   "${SUDO[@]}" tar -C /usr/local -xzf "$archive"
-  rm -rf "$tmp"
-  export PATH="/usr/local/go/bin:$PATH"
+  rm -rf "$tmp"; export PATH="/usr/local/go/bin:$PATH"
 }
 ensure_go
 
-if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
-  echo "Node.js and npm are required after package installation." >&2; exit 1
-fi
+if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then echo "Node.js and npm are required after package installation." >&2; exit 1; fi
 node_major="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)"
-if (( node_major < 18 )); then
-  echo "Node.js 18 or newer is required. Your distribution installed Node $(node --version)." >&2
-  echo "Update Node.js, then rerun the same SEGO install command." >&2
-  exit 1
-fi
+if (( node_major < 18 )); then echo "Node.js 18 or newer is required. Your distribution installed Node $(node --version)." >&2; echo "Update Node.js, then rerun the same SEGO install command." >&2; exit 1; fi
 
 cat <<PLAN
 
@@ -126,23 +109,26 @@ if [[ $YES -ne 1 ]]; then read -r -p "Continue? [Y/n] " a; [[ "${a:-y}" =~ ^([yY
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 cd "$REPO_ROOT"
 
-step "3/9" "Building the dashboard"
+step "3/9" "Resolving verified Go dependencies"
+go mod tidy
+
+step "4/9" "Building the dashboard"
 (
   cd web
   npm install --no-audit --no-fund
   npm run build
 )
 
-step "4/9" "Building SEGO"
+step "5/9" "Building SEGO"
 go build -trimpath -o "$TMP/sego-server" ./cmd/server
 go build -trimpath -o "$TMP/sego" ./cmd/sego
 
-step "5/9" "Creating secure folders"
+step "6/9" "Creating secure folders"
 if ! id -u sego >/dev/null 2>&1; then "${SUDO[@]}" useradd --system --home "$DATA" --shell /usr/sbin/nologin sego; fi
 "${SUDO[@]}" install -d -m 0755 "$PREFIX/bin" "$(dirname "$CONFIG")"
 "${SUDO[@]}" install -d -o sego -g sego -m 0750 "$DATA" "$DATA/web"
 
-step "6/9" "Installing files and automatic startup"
+step "7/9" "Installing files and automatic startup"
 "${SUDO[@]}" install -m 0755 "$TMP/sego-server" "$PREFIX/bin/sego-server"
 "${SUDO[@]}" install -m 0755 "$TMP/sego" "$PREFIX/bin/sego"
 "${SUDO[@]}" ln -sf "$PREFIX/bin/sego" /usr/local/bin/sego
@@ -150,35 +136,20 @@ step "6/9" "Installing files and automatic startup"
 "${SUDO[@]}" install -d -o sego -g sego -m 0750 "$DATA/web"
 "${SUDO[@]}" cp -a web/dist/. "$DATA/web/"
 "${SUDO[@]}" chown -R sego:sego "$DATA/web"
-
 "${SUDO[@]}" env SEGO_DATA_DIR="$DATA" "$PREFIX/bin/sego" --config "$CONFIG" mode "$PROFILE"
 "${SUDO[@]}" chown -R sego:sego "$DATA"
 "${SUDO[@]}" chown root:sego "$CONFIG"
 "${SUDO[@]}" chmod 0640 "$CONFIG"
-
 sed -e "s#/opt/sego/bin/sego-server#$PREFIX/bin/sego-server#g" -e "s#/etc/sego/sego.json#$CONFIG#g" -e "s#/var/lib/sego#$DATA#g" deploy/systemd/sego.service > "$TMP/sego.service"
 "${SUDO[@]}" install -m 0644 "$TMP/sego.service" /etc/systemd/system/sego.service
 "${SUDO[@]}" systemctl daemon-reload
 "${SUDO[@]}" systemctl enable --now sego.service
 
-step "7/9" "Checking the server"
+step "8/9" "Creating your administrator account"
 "${SUDO[@]}" "$PREFIX/bin/sego" --config "$CONFIG" doctor
 "${SUDO[@]}" systemctl --no-pager --full is-active sego.service >/dev/null || { echo "SEGO could not start. Run: sudo journalctl -u sego.service -n 100 --no-pager" >&2; exit 1; }
-
-step "8/9" "Creating your administrator account"
-if [[ -t 0 ]]; then
-  "${SUDO[@]}" "$PREFIX/bin/sego" --config "$CONFIG" setup
-else
-  echo "No interactive terminal is available. After install run: sudo sego setup"
-fi
+if [[ -t 0 ]]; then "${SUDO[@]}" "$PREFIX/bin/sego" --config "$CONFIG" setup; else echo "No interactive terminal is available. After install run: sudo sego setup"; fi
 
 step "9/9" "Installation complete"
-echo
-printf 'Open SEGO:  sego open\n'
-printf 'Check SEGO: sego status\n'
-printf 'Dashboard:  http://127.0.0.1:8088\n'
-printf 'Help:       sego help\n'
-
-if [[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]] && command -v xdg-open >/dev/null 2>&1; then
-  xdg-open http://127.0.0.1:8088 >/dev/null 2>&1 || true
-fi
+printf '\nOpen SEGO:  sego open\nCheck SEGO: sego status\nDashboard:  http://127.0.0.1:8088\nHelp:       sego help\n'
+if [[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]] && command -v xdg-open >/dev/null 2>&1; then xdg-open http://127.0.0.1:8088 >/dev/null 2>&1 || true; fi
