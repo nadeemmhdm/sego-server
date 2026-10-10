@@ -80,12 +80,39 @@ func controlService(action string)error{if runtime.GOOS=="windows"{var err error
 func runCommand(name string,args ...string)error{c:=exec.Command(name,args...);c.Stdout=os.Stdout;c.Stderr=os.Stderr;c.Stdin=os.Stdin;return c.Run()}
 func launchBrowser(url string)error{switch runtime.GOOS{case"windows":return exec.Command("rundll32","url.dll,FileProtocolHandler",url).Start();case"linux":return exec.Command("xdg-open",url).Start();case"darwin":return exec.Command("open",url).Start()};return fmt.Errorf("browser launch unsupported")}
 
-func updateCheck(){ctx,cancel:=context.WithTimeout(context.Background(),20*time.Second);defer cancel();info,err:=updater.Latest(ctx,version.Version);fatalIf(err);if info.Latest==""{fmt.Println("No published SEGO release is available yet.");return};if info.Available{fmt.Printf("Update available: %s -> %s\nRun: sego update auto\n",info.Current,info.Latest)}else{fmt.Printf("SEGO %s is up to date.\n",info.Current)}}
+func updateCheck(){ctx,cancel:=context.WithTimeout(context.Background(),20*time.Second);defer cancel();info,err:=updater.Latest(ctx,version.Version);fatalIf(err);if info.Latest==""{fmt.Println("No published SEGO release is available yet.");return};if info.Available{fmt.Printf("Update available: %s -> %s\nRun: sego update\n",info.Current,info.Latest)}else{fmt.Printf("SEGO %s is up to date.\n",info.Current)}}
 func runUpdater(cfg string)error{exe,err:=os.Executable();if err!=nil{return err};name:="sego-updater";if runtime.GOOS=="windows"{name+=".exe"};u:=filepath.Join(filepath.Dir(exe),name);if _,err=os.Stat(u);err!=nil{return fmt.Errorf("updater is not installed; rerun the SEGO installer")};if runtime.GOOS=="linux"&&os.Geteuid()!=0{return runCommand("sudo",u,"--config",cfg)};if runtime.GOOS=="windows"{ps:=fmt.Sprintf("$p=Start-Process -FilePath '%s' -ArgumentList '--config','%s' -Verb RunAs -Wait -PassThru; exit $p.ExitCode",strings.ReplaceAll(u,"'","''"),strings.ReplaceAll(cfg,"'","''"));return runCommand("powershell.exe","-NoProfile","-ExecutionPolicy","Bypass","-Command",ps)};return runCommand(u,"--config",cfg)}
 
-func tunnelSetup()error{fmt.Println("Cloudflare Tunnel setup\nBefore continuing, create a remotely-managed tunnel in Cloudflare and set its public hostname service to http://localhost:8088.");token:=strings.TrimSpace(readSecret("Paste the tunnel token (hidden): "));if len(token)<20{return fmt.Errorf("tunnel token looks invalid")};if runtime.GOOS=="linux"{if _,err:=exec.LookPath("cloudflared");err!=nil{fmt.Println("Installing cloudflared from Cloudflare's signed APT repository...");cmd:=`set -e; sudo mkdir -p --mode=0755 /usr/share/keyrings; curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg | sudo tee /usr/share/keyrings/cloudflare-main.gpg >/dev/null; echo "deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared any main" | sudo tee /etc/apt/sources.list.d/cloudflared.list >/dev/null; sudo apt-get update; sudo apt-get install -y cloudflared`;if err:=runCommand("bash","-lc",cmd);err!=nil{return err}};_ = runCommand("sudo","cloudflared","service","uninstall");if err:=runCommand("sudo","cloudflared","service","install",token);err!=nil{return err};_ = runCommand("sudo","systemctl","enable","cloudflared");if err:=runCommand("sudo","systemctl","restart","cloudflared");err!=nil{return err};fmt.Println("[OK] Tunnel service installed. It will reconnect automatically after reboot.");return nil};if runtime.GOOS=="windows"{ps:=`$ErrorActionPreference='Stop'; if(-not(Get-Command cloudflared.exe -ErrorAction SilentlyContinue)){winget install --id Cloudflare.cloudflared -e --silent --accept-package-agreements --accept-source-agreements | Out-Host}; $cf=(Get-Command cloudflared.exe -ErrorAction SilentlyContinue).Source; if(-not $cf){$cf=(Get-ChildItem 'C:\Program Files','C:\Program Files (x86)' -Filter cloudflared.exe -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName)}; if(-not $cf){throw 'cloudflared.exe not found after install'}; & $cf service uninstall 2>$null | Out-Null; & $cf service install $env:SEGO_TUNNEL_TOKEN; sc.exe config cloudflared start= auto | Out-Null; sc.exe start cloudflared | Out-Null`;c:=exec.Command("powershell.exe","-NoProfile","-ExecutionPolicy","Bypass","-Command",ps);c.Env=append(os.Environ(),"SEGO_TUNNEL_TOKEN="+token);c.Stdout=os.Stdout;c.Stderr=os.Stderr;c.Stdin=os.Stdin;if err:=c.Run();err!=nil{return err};fmt.Println("[OK] Tunnel service installed. It will reconnect automatically after reboot.");return nil};return fmt.Errorf("tunnel setup unsupported on %s",runtime.GOOS)}
+func tunnelSetup()error{
+	fmt.Println("Cloudflare Tunnel setup\nBefore continuing, create a remotely-managed tunnel in Cloudflare and set its public hostname service to http://localhost:8088.")
+	token:=strings.TrimSpace(readSecret("Paste the tunnel token (hidden): "))
+	if len(token)<20{return fmt.Errorf("tunnel token looks invalid")}
+	if runtime.GOOS=="linux"{
+		if _,err:=exec.LookPath("cloudflared");err!=nil{
+			fmt.Println("Installing cloudflared from Cloudflare's signed APT repository...")
+			cmd:=`set -e; sudo mkdir -p --mode=0755 /usr/share/keyrings; curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg | sudo tee /usr/share/keyrings/cloudflare-main.gpg >/dev/null; echo "deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared any main" | sudo tee /etc/apt/sources.list.d/cloudflared.list >/dev/null; sudo apt-get update; sudo apt-get install -y cloudflared`
+			if err:=runCommand("bash","-lc",cmd);err!=nil{return err}
+		}
+		_ = runCommand("sudo","cloudflared","service","uninstall")
+		if err:=runCommand("sudo","cloudflared","service","install",token);err!=nil{return err}
+		recoverCmd:=`set -e; sudo mkdir -p /etc/systemd/system/cloudflared.service.d; printf '%s\n' '[Unit]' 'After=network-online.target sego.service' 'Wants=network-online.target' '' '[Service]' 'Restart=always' 'RestartSec=5s' | sudo tee /etc/systemd/system/cloudflared.service.d/sego-restart.conf >/dev/null; sudo systemctl daemon-reload; sudo systemctl enable --now cloudflared; sudo systemctl restart cloudflared`
+		if err:=runCommand("bash","-lc",recoverCmd);err!=nil{return err}
+		if err:=exec.Command("systemctl","is-active","--quiet","cloudflared").Run();err!=nil{return fmt.Errorf("cloudflared service was installed but is not running")}
+		fmt.Println("[OK] Tunnel connected. It starts at boot and automatically reconnects after network or process failures.")
+		return nil
+	}
+	if runtime.GOOS=="windows"{
+		ps:=`$ErrorActionPreference='Stop'; if(-not(Get-Command cloudflared.exe -ErrorAction SilentlyContinue)){winget install --id Cloudflare.cloudflared -e --silent --accept-package-agreements --accept-source-agreements | Out-Host}; $cf=(Get-Command cloudflared.exe -ErrorAction SilentlyContinue).Source; if(-not $cf){$cf=(Get-ChildItem 'C:\Program Files','C:\Program Files (x86)' -Filter cloudflared.exe -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName)}; if(-not $cf){throw 'cloudflared.exe not found after install'}; & $cf service uninstall 2>$null | Out-Null; & $cf service install $env:SEGO_TUNNEL_TOKEN; sc.exe config cloudflared start= auto | Out-Null; sc.exe failure cloudflared reset= 0 actions= restart/5000/restart/15000/restart/60000 | Out-Null; sc.exe failureflag cloudflared 1 | Out-Null; $svc=Get-Service cloudflared -ErrorAction Stop; if($svc.Status -ne 'Running'){Start-Service cloudflared}; Start-Sleep -Seconds 1; if((Get-Service cloudflared).Status -ne 'Running'){throw 'cloudflared service did not start'}`
+		c:=exec.Command("powershell.exe","-NoProfile","-ExecutionPolicy","Bypass","-Command",ps)
+		c.Env=append(os.Environ(),"SEGO_TUNNEL_TOKEN="+token);c.Stdout=os.Stdout;c.Stderr=os.Stderr;c.Stdin=os.Stdin
+		if err:=c.Run();err!=nil{return err}
+		fmt.Println("[OK] Tunnel connected. The Windows service starts at boot and automatically restarts after failures.")
+		return nil
+	}
+	return fmt.Errorf("tunnel setup unsupported on %s",runtime.GOOS)
+}
 func tunnelStatus(){if runtime.GOOS=="windows"{_ = runCommand("sc.exe","query","cloudflared");return};if runtime.GOOS=="linux"{_ = runCommand("systemctl","--no-pager","status","cloudflared");return};fmt.Println("Tunnel status unsupported on this OS")}
-func tunnelRemove()error{if runtime.GOOS=="windows"{return runCommand("powershell.exe","-NoProfile","-Command","$c=(Get-Command cloudflared.exe -ErrorAction Stop).Source; & $c service uninstall")};if runtime.GOOS=="linux"{return runCommand("sudo","cloudflared","service","uninstall")};return fmt.Errorf("tunnel removal unsupported")}
+func tunnelRemove()error{if runtime.GOOS=="windows"{return runCommand("powershell.exe","-NoProfile","-Command","$c=(Get-Command cloudflared.exe -ErrorAction Stop).Source; & $c service uninstall")};if runtime.GOOS=="linux"{_ = runCommand("sudo","rm","-f","/etc/systemd/system/cloudflared.service.d/sego-restart.conf");_ = runCommand("sudo","systemctl","daemon-reload");return runCommand("sudo","cloudflared","service","uninstall")};return fmt.Errorf("tunnel removal unsupported")}
 
 func ensureAdmin(d *sql.DB){var n int;fatalIf(d.QueryRow(`SELECT COUNT(*) FROM users WHERE role IN ('super_admin','admin')`).Scan(&n));if n>0{fmt.Printf("[OK] administrator already configured (%d admin account(s))\n",n);return};fmt.Println("\nCreate your SEGO administrator account\nThis account controls users, security and server settings.");createAdmin(d)}
 func createAdmin(d *sql.DB){r:=bufio.NewReader(os.Stdin);fmt.Print("Admin username: ");u,_:=r.ReadString('\n');u=strings.TrimSpace(u);if len(u)<3{fatalIf(fmt.Errorf("username must be at least 3 characters"))};p1:=readSecret("Password (12+ characters): ");p2:=readSecret("Confirm password: ");if p1!=p2{fatalIf(fmt.Errorf("passwords do not match"))};h,err:=auth.HashPassword(p1);fatalIf(err);_,err=d.Exec(`INSERT INTO users(username,password_hash,role,created_at) VALUES(?,?,?,?)`,u,h,"super_admin",time.Now().UTC().Format(time.RFC3339));fatalIf(err);fmt.Println("[OK] Super Admin created")}
@@ -97,11 +124,12 @@ func fatalIf(err error){if err!=nil{fmt.Fprintln(os.Stderr,"SEGO:",err);os.Exit(
 func quickHelp(){fmt.Println(`SEGO Server
 
 Easy commands:
-  sego open          Open the dashboard
+  sego               Open the dashboard
   sego status        Check the server
   sego start         Start SEGO
   sego stop          Stop SEGO
-  sego tunnel setup  Set up remote access once
+  sego remote        Set up remote access once
+  sego update        Install the latest GitHub Release update
   sego update check  Check for a release update
   sego help          Show commands`)}
 func usage(){fmt.Println(`SEGO Server CLI

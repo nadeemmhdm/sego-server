@@ -86,8 +86,8 @@ Write-Host "`nSEGO is ready to install." -ForegroundColor Cyan
 Write-Host "  Mode      : $Profile"
 Write-Host '  Dashboard : http://127.0.0.1:8088'
 Write-Host "  Data      : $Data"
-Write-Host '  Startup   : automatic'
-Write-Host '  Updates   : automatic GitHub Release checks'
+Write-Host '  Startup   : automatic background startup with restart recovery'
+Write-Host '  Updates   : automatic GitHub Release checks and verified package updates'
 Write-Host 'No disk will be formatted or repartitioned. Existing SEGO data is preserved.'
 if (-not $Yes) {
     $a = Read-Host 'Continue? [Y/n]'
@@ -138,18 +138,20 @@ try {
     Step '5/8 Protecting server data'
     & icacls $Data /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' | Out-Null
 
-    Step '6/8 Enabling automatic startup and updates'
+    Step '6/8 Enabling automatic background startup and release updates'
     $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
     $serverExe = Join-Path $Bin 'sego-server.exe'
     $serverAction = New-ScheduledTaskAction -Execute $serverExe -Argument "--config `"$Config`""
     $serverTrigger = New-ScheduledTaskTrigger -AtStartup
-    Register-ScheduledTask -TaskName 'SEGO Server' -Action $serverAction -Trigger $serverTrigger -Principal $principal -Description 'SEGO Server private cloud storage service' -Force | Out-Null
+    $serverSettings = New-ScheduledTaskSettingsSet -StartWhenAvailable -RestartCount 10 -RestartInterval (New-TimeSpan -Minutes 1) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew
+    Register-ScheduledTask -TaskName 'SEGO Server' -Action $serverAction -Trigger $serverTrigger -Principal $principal -Settings $serverSettings -Description 'SEGO Server private cloud background service' -Force | Out-Null
     Start-ScheduledTask -TaskName 'SEGO Server'
 
     $updateExe = Join-Path $Bin 'sego-updater.exe'
     $updateAction = New-ScheduledTaskAction -Execute $updateExe -Argument "--config `"$Config`""
     $updateTriggers = @((New-ScheduledTaskTrigger -AtStartup),(New-ScheduledTaskTrigger -Daily -At 4am))
-    Register-ScheduledTask -TaskName 'SEGO Update' -Action $updateAction -Trigger $updateTriggers -Principal $principal -Description 'SEGO GitHub Release update checker' -Force | Out-Null
+    $updateSettings = New-ScheduledTaskSettingsSet -StartWhenAvailable -RestartCount 5 -RestartInterval (New-TimeSpan -Minutes 5) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 30) -MultipleInstances IgnoreNew
+    Register-ScheduledTask -TaskName 'SEGO Update' -Action $updateAction -Trigger $updateTriggers -Principal $principal -Settings $updateSettings -Description 'SEGO GitHub Release update checker and installer' -Force | Out-Null
     Add-MachinePath $Bin
 
     Step '7/8 Creating your administrator account'
@@ -161,11 +163,14 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'SEGO diagnostics failed.' }
 
     Write-Host "`nSEGO Server is installed." -ForegroundColor Green
-    Write-Host 'Open SEGO:  sego open'
-    Write-Host 'Check SEGO: sego status'
-    Write-Host 'Remote:     sego tunnel setup'
-    Write-Host 'Updates:    sego update check'
-    Write-Host 'Dashboard:  http://127.0.0.1:8088'
+    Write-Host 'Open SEGO:    sego'
+    Write-Host 'Check SEGO:   sego status'
+    Write-Host 'Remote once:  sego remote'
+    Write-Host 'Update now:   sego update'
+    Write-Host 'Update check: sego update check'
+    Write-Host 'Dashboard:    http://127.0.0.1:8088'
+    Write-Host 'After a reboot SEGO starts in the background automatically.'
+    Write-Host 'If a tunnel was configured once, cloudflared reconnects automatically too.'
     try { Start-Process 'http://127.0.0.1:8088' } catch {}
 }
 finally { Pop-Location }

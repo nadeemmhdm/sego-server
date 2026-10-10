@@ -13,19 +13,21 @@ http://localhost:8088
 Then, on the SEGO server computer, run:
 
 ```text
-sego tunnel setup
+sego remote
 ```
 
-Paste the tunnel token when prompted. The prompt is hidden so the token is not intentionally added to command history.
+`sego remote` is the beginner alias for `sego tunnel setup`. Paste the tunnel token when prompted. The prompt is hidden so the token is not intentionally added to command history.
 
-## Boot-time reconnect
+## Automatic boot reconnect
 
-SEGO installs `cloudflared` using the OS service model:
+Tunnel setup is needed only once unless the token is rotated or the service is removed.
 
-- Linux: cloudflared systemd service
-- Windows: cloudflared Windows service
+After setup:
 
-Once configured, the tunnel starts/reconnects automatically after reboot.
+- Linux installs/enables the `cloudflared` systemd service, orders it after networking/SEGO, and configures automatic restart after failures.
+- Windows configures the `cloudflared` Windows service for automatic boot startup and restart-on-failure recovery.
+- If the laptop/server is powered off and later turned on, SEGO starts in the background and the configured tunnel reconnects automatically when networking is available.
+- If no tunnel has ever been configured, SEGO does not invent a tunnel or expose the server automatically.
 
 Check it with:
 
@@ -33,7 +35,7 @@ Check it with:
 sego tunnel status
 ```
 
-Remove the local service with:
+Remove the local tunnel service with:
 
 ```text
 sego tunnel remove

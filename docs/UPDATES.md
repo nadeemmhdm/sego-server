@@ -1,23 +1,25 @@
 # Updates
 
-SEGO uses GitHub Releases as its update channel.
+SEGO uses published GitHub Releases as its normal automatic update channel.
 
-## Commands
+## Beginner commands
 
 ```text
 sego version
 sego update check
-sego update auto
+sego update
 ```
+
+`sego update` installs the newest eligible published release. The longer compatibility command `sego update auto` still works.
 
 ## Automatic schedule
 
-Normal one-command installation enables background update checks:
+Normal one-command installation enables background update checks without requiring the user to open SEGO:
 
-- Linux: `sego-update.timer`, after boot and approximately daily
-- Windows: `SEGO Update` scheduled task, at startup and daily
+- Linux: `sego-update.timer` starts a few minutes after boot, then checks approximately every 6 hours with a small randomized delay.
+- Windows: `SEGO Update` runs at startup and daily, uses `StartWhenAvailable`, and retries transient failures.
 
-If no published GitHub Release exists, no update is installed.
+The updater calls GitHub's latest-release endpoint. Draft and prerelease builds are not selected by that endpoint. If no newer published GitHub Release exists, nothing is installed.
 
 ## Update package requirements
 
@@ -26,7 +28,11 @@ A release is installable only when it contains:
 - a platform archive named `sego-server_<version>_<os>_<arch>.tar.gz` or `.zip`
 - `SHA256SUMS` containing the archive hash
 
-The updater downloads both before stopping SEGO and verifies SHA-256 before extraction.
+The updater downloads both before stopping SEGO and verifies the package SHA-256 before extraction. After replacement it restarts SEGO and verifies the local health endpoint.
+
+## Boot and network behavior
+
+SEGO itself starts as a background boot service/task. Update checks do not require a browser session or user login. If networking is temporarily unavailable, Linux checks again on the next timer activation and Windows is configured to retry/start when available.
 
 ## Rollback behavior
 
@@ -34,7 +40,7 @@ The updater keeps the current binaries and dashboard in a temporary local backup
 
 ## Release workflow
 
-Pushing a `v*` Git tag triggers the repository release workflow. It builds platform packages, generates `SHA256SUMS`, and publishes GitHub Release assets.
+Pushing a `v*` Git tag triggers the repository release workflow. It builds platform packages, embeds the tag version into the binaries, generates `SHA256SUMS`, and publishes GitHub Release assets.
 
 ## Current trust boundary
 

@@ -11,5 +11,6 @@ try{& go build -trimpath -o $updater ./cmd/updater;if($LASTEXITCODE-ne 0){throw 
 $action=New-ScheduledTaskAction -Execute $updater -Argument "--config `"$config`""
 $triggers=@((New-ScheduledTaskTrigger -AtStartup),(New-ScheduledTaskTrigger -Daily -At 4am))
 $principal=New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
-Register-ScheduledTask -TaskName 'SEGO Update' -Action $action -Trigger $triggers -Principal $principal -Description 'SEGO GitHub Release update checker' -Force|Out-Null
-Write-Host '[OK] Automatic GitHub Release checks enabled.' -ForegroundColor Green
+$settings=New-ScheduledTaskSettingsSet -StartWhenAvailable -RestartCount 5 -RestartInterval (New-TimeSpan -Minutes 5) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 30) -MultipleInstances IgnoreNew
+Register-ScheduledTask -TaskName 'SEGO Update' -Action $action -Trigger $triggers -Principal $principal -Settings $settings -Description 'SEGO GitHub Release update checker and installer' -Force|Out-Null
+Write-Host '[OK] Automatic GitHub Release checks enabled at boot and daily.' -ForegroundColor Green

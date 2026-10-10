@@ -2,9 +2,9 @@
 Description=Check GitHub Releases for SEGO updates
 
 [Timer]
-OnBootSec=15min
-OnUnitActiveSec=24h
-RandomizedDelaySec=2h
+OnBootSec=3min
+OnUnitActiveSec=6h
+RandomizedDelaySec=15min
 Persistent=true
 Unit=sego-update.service
 
